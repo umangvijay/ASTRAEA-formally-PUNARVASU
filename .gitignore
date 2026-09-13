@@ -1,0 +1,43 @@
+# environment / secrets — never publish keys
+.env
+.env.*
+!.env.example
+*.pem
+credentials.json
+*-credentials.json
+service-account*.json
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# node
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# local runtime (sqlite, chroma, trained weights, ports)
+/data/*
+!/data/demo/
+!/data/demo/**
+data/minio/
+data/volumes/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# os / editor
+.DS_Store
+*.log
+.cursor/
+tmp-ui/
+*.ses
+*.tsbuildinfo

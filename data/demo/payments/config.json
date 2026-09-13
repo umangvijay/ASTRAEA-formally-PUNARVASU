@@ -1,0 +1,5 @@
+{
+  "pool_size": 1,
+  "timeout_ms": 300,
+  "circuit_breaker": true
+}

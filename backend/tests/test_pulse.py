@@ -1,0 +1,99 @@
+"""PULSE gate: ingest, series, and anomaly detection with learned baselines."""
+
+from __future__ import annotations
+
+import random
+
+import pytest
+
+from app.pulse import detector
+from app.pulse.models import Anomaly, FaultInjection
+from app.db import SessionLocal
+
+NORMAL = {"request_rate": 10.0, "error_rate": 0.5, "p95_latency": 80.0, "cpu": 25.0}
+FAULT_SHAPES = {
+    "error_storm": {"request_rate": 10.0, "error_rate": 40.0, "p95_latency": 90.0, "cpu": 30.0},
+    "latency_spike": {"request_rate": 9.0, "error_rate": 1.0, "p95_latency": 900.0, "cpu": 30.0},
+    "memory_leak": {"request_rate": 5.0, "error_rate": 2.0, "p95_latency": 120.0, "cpu": 90.0},
+    "dependency_failure": {"request_rate": 8.0, "error_rate": 25.0, "p95_latency": 400.0, "cpu": 35.0},
+    "config_drift": {"request_rate": 8.0, "error_rate": 8.0, "p95_latency": 500.0, "cpu": 30.0},
+}
+
+
+async def _ingest(client, auth_headers, service, metrics):
+    resp = await client.post(
+        "/api/pulse/ingest", headers=auth_headers,
+        json={"type": "metrics", "service": service, "metrics": metrics},
+    )
+    assert resp.status_code == 200
+
+
+async def test_ingest_and_series(client, auth_headers):
+    m = {**NORMAL, "request_rate": 10.0 + random.uniform(-1, 1)}
+    await _ingest(client, auth_headers, "checkout", m)
+    series = (await client.get("/api/pulse/series/checkout", headers=auth_headers)).json()
+    assert len(series["points"]) == 1
+    assert abs(series["points"][0]["error_rate"] - m["error_rate"]) < 0.01
+
+
+async def test_chaos_without_demo_services_is_graceful_503(client, auth_headers, monkeypatch):
+    import httpx as _hx
+
+    from app.demo import services as _demo
+
+    async def _unreachable(service, path):
+        raise _hx.ConnectError("no demo services in this environment")
+
+    monkeypatch.setattr(_demo, "_call_service", _unreachable)
+    resp = await client.post("/api/pulse/chaos", headers=auth_headers, json={})
+    assert resp.status_code == 503
+
+
+async def test_detector_flags_drift_and_stops_the_mttd_clock(client, auth_headers, app, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "anomaly_cooldown_seconds", 60)
+    tenant_id = _tid(auth_headers)
+    # open fault (as the chaos API would record it)
+    async with SessionLocal() as db:
+        db.add(FaultInjection(tenant_id=tenant_id, service="checkout", kind="error_storm"))
+        await db.commit()
+
+    # learn a baseline: 40 calm points
+    for _ in range(40):
+        await _ingest(client, auth_headers, "checkout", {
+            k: v + random.uniform(-0.4, 0.4) for k, v in NORMAL.items()})
+    # then the storm hits: 6 anomalous points
+    for _ in range(6):
+        await _ingest(client, auth_headers, "checkout", {
+            k: v + random.uniform(-2, 2) for k, v in FAULT_SHAPES["error_storm"].items()})
+
+    anomalies = await detector.detect_once(tenant_id)
+    assert len(anomalies) == 1
+    a = anomalies[0]
+    assert a.service == "checkout"
+    assert a.evidence["drifted"] == "error_rate"
+    assert abs(a.evidence["drift_sigma"]) >= 3.0
+
+    # benchmark clock stopped + cooldown prevents re-paging
+    async with SessionLocal() as db:
+        fault = (await db.execute(
+            __import__("sqlalchemy").select(FaultInjection)
+            .where(FaultInjection.tenant_id == tenant_id))).scalars().first()
+        assert fault.detected_at is not None and fault.anomaly_id == a.id
+    again = await detector.detect_once(tenant_id)
+    assert again == []
+
+
+async def test_healthy_services_stay_quiet(client, auth_headers):
+    for _ in range(45):
+        for svc in ("payments", "inventory"):
+            await _ingest(client, auth_headers, svc, {
+                k: v + random.uniform(-0.5, 0.5) for k, v in NORMAL.items()})
+    assert await detector.detect_once(_tid(auth_headers)) == []
+
+
+def _tid(auth_headers) -> str:
+    from app.shared.security import decode_access_token
+
+    return decode_access_token(auth_headers["Authorization"].removeprefix("Bearer "))["tid"]

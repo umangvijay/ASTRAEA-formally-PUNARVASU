@@ -1,0 +1,88 @@
+# PUNARVASU infrastructure — activated by profiles, driven by `main.py`
+#   lite mode  → none of this is required (sqlite, no containers)
+#   docker mode→ main.py picks the right profiles for --profile <x>
+
+services:
+  # ── core (Phase 0+) ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["core"]
+    environment:
+      POSTGRES_USER: astra
+      POSTGRES_PASSWORD: astra
+      POSTGRES_DB: punarvasu
+    ports: ["5432:5432"]
+    volumes: ["data/volumes/postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astra -d punarvasu"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["core"]
+    ports: ["6379:6379"]
+    volumes: ["data/volumes/redis:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    profiles: ["core"]
+    ports: ["6333:6333", "6334:6334"]
+    volumes: ["data/volumes/qdrant:/qdrant/storage"]
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["core"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: astra
+      MINIO_ROOT_PASSWORD: astra-secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["data/volumes/minio:/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ── sre (Phase 2: MEDIC) ────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    profiles: ["sre"]
+    ports: ["8123:8123", "9000:9000"]
+    volumes: ["data/volumes/clickhouse:/var/lib/clickhouse"]
+    ulimits:
+      nofile: 262144
+
+  # ── soc (Phase 4: SHIELD) ───────────────────────────────────────
+  neo4j:
+    image: neo4j:5-community
+    profiles: ["soc"]
+    environment:
+      NEO4J_AUTH: none
+    ports: ["7474:7474", "7687:7687"]
+    volumes: ["data/volumes/neo4j:/data"]
+
+  # ── observability (Phase 2+) ────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: ["observability"]
+    ports: ["9090:9090"]
+    volumes: ["data/volumes/prometheus:/prometheus"]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: ["observability"]
+    ports: ["3001:3000"]   # host 3001 — 3000 belongs to the Next.js console
+    volumes: ["data/volumes/grafana:/var/lib/grafana"]
+
+  loki:
+    image: grafana/loki:3.1.1
+    profiles: ["observability"]
+    ports: ["3100:3100"]
