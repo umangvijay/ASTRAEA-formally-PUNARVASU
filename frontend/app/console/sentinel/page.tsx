@@ -19,8 +19,10 @@ export default function SentinelPage() {
   const [live, setLive] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
+  const fail = (e: unknown) =>
+    setNote(e instanceof Error ? e.message : "SENTINEL API failed");
+
   useEffect(() => {
-    const fail = (e: unknown) => setNote(e instanceof Error ? e.message : "SENTINEL API failed");
     api<{ rules: Rule[] }>("/api/sentinel/rules").then((r) => setRules(r.rules)).catch(fail);
     api<{ events: Ev[] }>("/api/sentinel/events").then((r) => setEvents(r.events)).catch(fail);
     api<Stats>("/api/sentinel/stats").then(setStats).catch(fail);
