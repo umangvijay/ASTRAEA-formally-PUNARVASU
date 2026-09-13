@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     brave_api_key: str = ""
     # General-chat quality first; the SQL champion is only routed to by explicit
     # model hint ("pvu-sql"/"model_forge") — never as the default brain.
-    llm_provider_order: str = "vertex,gemini,anthropic,groq,ollama,model_forge,mlx_local"
+    llm_provider_order: str = "vertex"
     gemini_default_model: str = "gemini-3.8-flash"
     groq_default_model: str = "llama-3.3-70b-versatile"
     ollama_default_model: str = "llama3.2"

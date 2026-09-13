@@ -9,6 +9,7 @@ ProviderUnavailable and the caller degrades gracefully — never a hardcoded can
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import time
 from collections.abc import AsyncIterator
@@ -48,39 +49,93 @@ _adc_token: tuple[float, str] | None = None
 
 
 def _vertex_adc_token() -> str:
-    """Application Default Credentials — gcloud auth application-default login,
-    GOOGLE_APPLICATION_CREDENTIALS, or the GCE/Cloud Run metadata server."""
+    """Get a Vertex OAuth token from ADC, with a Cloud Run metadata fallback."""
     global _adc_token
+
     now = time.time()
-    if _adc_token and now - _adc_token[0] < 240:
+    if _adc_token and now - _adc_token[0] < 240 and _adc_token[1]:
         return _adc_token[1]
+
     token = ""
+    log = logging.getLogger(__name__)
+
+    # Preferred path: Google Application Default Credentials.
     try:
         import google.auth
         from google.auth.transport.requests import Request
 
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+
         if not creds.valid:
             creds.refresh(Request())
+
         token = creds.token or ""
+
+        if token:
+            log.info("Vertex ADC token acquired via google-auth")
+
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning(
-            "Vertex ADC unavailable: %s: %s",
+        log.warning(
+            "Vertex google-auth ADC unavailable: %s: %s",
             type(exc).__name__,
             str(exc),
         )
-        token = ""
+
+    # Cloud Run fallback: fetch an OAuth token directly from the metadata server.
+    if not token:
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(
+                "http://metadata.google.internal/computeMetadata/v1/"
+                "instance/service-accounts/default/token",
+                headers={"Metadata-Flavor": "Google"},
+            )
+
+            with urllib.request.urlopen(req, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+
+            token = str(payload.get("access_token") or "")
+
+            if token:
+                log.info("Vertex ADC token acquired via Cloud Run metadata server")
+            else:
+                log.warning("Cloud Run metadata server returned no access token")
+
+        except Exception as exc:
+            log.warning(
+                "Vertex metadata ADC unavailable: %s: %s",
+                type(exc).__name__,
+                str(exc),
+            )
+
     _adc_token = (now, token)
     return token
 
 
 def _vertex_ready() -> bool:
+    """Return whether Vertex is configured and an OAuth credential is obtainable."""
+    log = logging.getLogger(__name__)
+
     if not settings.vertex_project:
+        log.warning("Vertex provider not ready: ASTRAEA_VERTEX_PROJECT is empty")
         return False
+
     if settings.vertex_access_token or settings.vertex_api_key or settings.gemini_api_key:
         return True
-    return bool(_vertex_adc_token())
+
+    token = _vertex_adc_token()
+
+    if not token:
+        log.warning(
+            "Vertex provider not ready: project=%s location=%s but no ADC token",
+            settings.vertex_project,
+            settings.vertex_location,
+        )
+
+    return bool(token)
 
 
 def _provider_ready(provider: str) -> bool:
