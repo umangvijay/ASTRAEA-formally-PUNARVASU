@@ -1,9 +1,8 @@
 "use client";
 
 /**
- * Observatory sky: 3D earth + moon drift on random headings, comets
- * from random edges. No sun sprite (the painted burst is veined out).
- * Texture spins on the sphere; lighting stays put.
+ * Observatory sky: earth + moon drift across the field, thin meteors
+ * from random edges. No sun sprite. Lighting stays on the sphere.
  */
 import { useEffect, useRef } from "react";
 
@@ -18,39 +17,38 @@ type Wanderer = {
   vx: number;
   vy: number;
   speed: number;
-  xmin: number;
-  xmax: number;
-  ymin: number;
-  ymax: number;
 };
 
 function kick(b: Wanderer) {
-  const speed = b.speed * rand(0.55, 1.25);
   const a = rand(0, Math.PI * 2);
-  b.vx = Math.cos(a) * speed;
-  b.vy = Math.sin(a) * speed;
+  b.vx = Math.cos(a) * b.speed;
+  b.vy = Math.sin(a) * b.speed;
 }
 
 function launchComet(el: HTMLElement) {
   const edge = Math.floor(rand(0, 4));
   let x: number;
   let y: number;
+  let heading: number;
   if (edge === 0) {
-    x = rand(-8, 108);
-    y = -18;
+    x = rand(8, 92);
+    y = -10;
+    heading = rand(Math.PI * 0.18, Math.PI * 0.82);
   } else if (edge === 1) {
-    x = 112;
-    y = rand(-8, 108);
+    x = 110;
+    y = rand(6, 90);
+    heading = rand(Math.PI * 0.68, Math.PI * 1.32);
   } else if (edge === 2) {
-    x = rand(-8, 108);
-    y = 112;
+    x = rand(8, 92);
+    y = 110;
+    heading = rand(-Math.PI * 0.82, -Math.PI * 0.18);
   } else {
-    x = -18;
-    y = rand(-8, 108);
+    x = -10;
+    y = rand(6, 90);
+    heading = rand(-Math.PI * 0.32, Math.PI * 0.32);
   }
-  const heading = rand(0, Math.PI * 2);
-  const dist = rand(120, 190);
-  const dur = rand(2.6, 7.2);
+  const dist = rand(72, 128);
+  const dur = rand(0.9, 2.15);
   el.style.setProperty("--cx", `${x}vw`);
   el.style.setProperty("--cy", `${y}vh`);
   el.style.setProperty("--dx", `${x + Math.cos(heading) * dist}vw`);
@@ -66,7 +64,7 @@ function launchComet(el: HTMLElement) {
 export function Cosmos() {
   const earthRef = useRef<HTMLDivElement>(null);
   const moonRef = useRef<HTMLDivElement>(null);
-  const cometRefs = useRef<(HTMLSpanElement | null)[]>([null, null, null]);
+  const cometRefs = useRef<(HTMLSpanElement | null)[]>([null, null]);
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -76,29 +74,21 @@ export function Cosmos() {
     if (earthRef.current) {
       bodies.push({
         el: earthRef.current,
-        x: rand(84, 90),
-        y: rand(14, 20),
+        x: rand(52, 78),
+        y: rand(10, 32),
         vx: 0,
         vy: 0,
-        speed: rand(0.01, 0.018),
-        xmin: 82,
-        xmax: 91,
-        ymin: 12,
-        ymax: 22,
+        speed: rand(3.6, 6.2),
       });
     }
     if (moonRef.current) {
       bodies.push({
         el: moonRef.current,
-        x: rand(4, 10),
-        y: rand(70, 78),
+        x: rand(6, 28),
+        y: rand(48, 72),
         vx: 0,
         vy: 0,
-        speed: rand(0.014, 0.024),
-        xmin: 3,
-        xmax: 14,
-        ymin: 66,
-        ymax: 82,
+        speed: rand(5.2, 8.8),
       });
     }
     for (const b of bodies) {
@@ -110,24 +100,29 @@ export function Cosmos() {
       const id = window.setTimeout(() => {
         kick(b);
         scheduleKick(b);
-      }, rand(2800, 8200));
+      }, rand(4200, 11000));
       timeouts.push(id);
     };
     bodies.forEach(scheduleKick);
 
+    let last = performance.now();
     let raf = 0;
-    const tick = () => {
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
       for (const b of bodies) {
-        b.x += b.vx;
-        b.y += b.vy;
-        if (b.x < b.xmin || b.x > b.xmax) {
-          b.vx *= -1;
-          b.x = Math.min(b.xmax, Math.max(b.xmin, b.x));
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        let bounced = false;
+        if (b.x < 4 || b.x > 86) {
+          b.x = Math.min(86, Math.max(4, b.x));
+          bounced = true;
         }
-        if (b.y < b.ymin || b.y > b.ymax) {
-          b.vy *= -1;
-          b.y = Math.min(b.ymax, Math.max(b.ymin, b.y));
+        if (b.y < 6 || b.y > 78) {
+          b.y = Math.min(78, Math.max(6, b.y));
+          bounced = true;
         }
+        if (bounced) kick(b);
         b.el.style.transform = `translate3d(${b.x}vw, ${b.y}vh, 0)`;
       }
       raf = requestAnimationFrame(tick);
@@ -139,12 +134,12 @@ export function Cosmos() {
       const id = window.setTimeout(() => {
         if (cancelled) return;
         const dur = launchComet(el);
-        scheduleComet(el, dur * 1000 + rand(500, 2800));
+        scheduleComet(el, dur * 1000 + rand(2200, 7800));
       }, delay);
       timeouts.push(id);
     };
     cometRefs.current.forEach((el, i) => {
-      if (el) scheduleComet(el, 400 + i * rand(700, 1600));
+      if (el) scheduleComet(el, 900 + i * rand(1600, 3200));
     });
 
     return () => {
@@ -158,19 +153,31 @@ export function Cosmos() {
     <div className="cosmos" aria-hidden>
       <div className="cosmos-sky-wrap">
         <img className="cosmos-sky" src="/cosmos/milkyway.png" alt="" />
+        <span className="cosmos-stars" />
         <span className="cosmos-sky-veil" />
       </div>
       <div ref={earthRef} className="cosmos-body cosmos-earth">
-        <img className="cosmos-body-tex" src="/cosmos/earth.png" alt="" />
-        <span className="cosmos-body-shade" />
+        <span className="cosmos-body-globe">
+          <img className="cosmos-body-tex" src="/cosmos/earth.png" alt="" />
+          <span className="cosmos-body-shade" />
+        </span>
       </div>
       <div ref={moonRef} className="cosmos-body cosmos-moon">
-        <img className="cosmos-body-tex" src="/cosmos/moon.png" alt="" />
-        <span className="cosmos-body-shade" />
+        <span className="cosmos-body-globe">
+          <img className="cosmos-body-tex" src="/cosmos/moon.png" alt="" />
+          <span className="cosmos-body-shade" />
+        </span>
       </div>
-      <span className="cosmos-comet" ref={(n) => { cometRefs.current[0] = n; }} />
-      <span className="cosmos-comet cosmos-comet--b" ref={(n) => { cometRefs.current[1] = n; }} />
-      <span className="cosmos-comet cosmos-comet--c" ref={(n) => { cometRefs.current[2] = n; }} />
+      <span className="cosmos-comet" ref={(n) => { cometRefs.current[0] = n; }}>
+        <span className="cosmos-comet-dust" />
+        <span className="cosmos-comet-ion" />
+        <span className="cosmos-comet-head" />
+      </span>
+      <span className="cosmos-comet cosmos-comet--b" ref={(n) => { cometRefs.current[1] = n; }}>
+        <span className="cosmos-comet-dust" />
+        <span className="cosmos-comet-ion" />
+        <span className="cosmos-comet-head" />
+      </span>
     </div>
   );
 }

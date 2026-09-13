@@ -70,43 +70,59 @@ html, body {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   object-fit: cover;
-  opacity: 0.28;
+  opacity: 0.32;
+}
+.cosmos-stars {
+  position: absolute; inset: 0;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(1px 1px at 8% 14%, rgba(255, 248, 236, 0.85), transparent),
+    radial-gradient(1px 1px at 18% 42%, rgba(255, 248, 236, 0.45), transparent),
+    radial-gradient(1.5px 1.5px at 26% 8%, rgba(255, 248, 236, 0.7), transparent),
+    radial-gradient(1px 1px at 37% 71%, rgba(255, 248, 236, 0.4), transparent),
+    radial-gradient(1px 1px at 48% 22%, rgba(255, 248, 236, 0.65), transparent),
+    radial-gradient(1px 1px at 59% 58%, rgba(255, 248, 236, 0.35), transparent),
+    radial-gradient(1.5px 1.5px at 67% 12%, rgba(255, 248, 236, 0.55), transparent),
+    radial-gradient(1px 1px at 74% 81%, rgba(255, 248, 236, 0.4), transparent),
+    radial-gradient(1px 1px at 83% 33%, rgba(255, 248, 236, 0.6), transparent),
+    radial-gradient(1px 1px at 91% 64%, rgba(255, 248, 236, 0.35), transparent),
+    radial-gradient(1px 1px at 14% 88%, rgba(255, 248, 236, 0.4), transparent),
+    radial-gradient(1px 1px at 41% 46%, rgba(255, 248, 236, 0.3), transparent);
 }
 .cosmos-sky-veil {
   position: absolute; inset: 0;
   background:
-    radial-gradient(ellipse 42% 40% at 94% -2%, rgba(8, 7, 6, 1) 0%, rgba(8, 7, 6, 0.92) 28%, transparent 62%),
-    radial-gradient(ellipse 90% 80% at 50% 40%, transparent 35%, rgba(8, 7, 6, 0.42) 100%),
-    linear-gradient(180deg, rgba(8, 7, 6, 0.18), rgba(8, 7, 6, 0.5));
+    radial-gradient(ellipse 38% 36% at 94% -4%, rgba(8, 7, 6, 0.92) 0%, transparent 58%),
+    radial-gradient(ellipse 90% 80% at 50% 40%, transparent 42%, rgba(8, 7, 6, 0.32) 100%),
+    linear-gradient(180deg, rgba(8, 7, 6, 0.1), rgba(8, 7, 6, 0.38));
 }
 .cosmos-body {
   position: absolute;
   left: 0; top: 0;
-  border-radius: 50%;
-  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  filter: none;
   will-change: transform;
-  background: #02060e;
-  isolation: isolate;
-  clip-path: circle(50% at 50% 50%);
-  -webkit-clip-path: circle(50% at 50% 50%);
 }
 .cosmos-earth {
-  width: min(10vw, 108px);
-  height: min(10vw, 108px);
-  transform: translate3d(86vw, 16vh, 0);
-  box-shadow:
-    inset -12px -10px 16px rgba(0, 0, 0, 0.38),
-    inset 8px 6px 12px rgba(140, 190, 255, 0.12),
-    0 0 22px 5px rgba(70, 140, 210, 0.22);
+  width: min(11vw, 124px);
+  height: min(11vw, 124px);
+  transform: translate3d(68vw, 16vh, 0);
 }
 .cosmos-moon {
-  width: min(4.4vw, 48px);
-  height: min(4.4vw, 48px);
-  transform: translate3d(6vw, 72vh, 0);
-  box-shadow:
-    inset -10px -8px 14px rgba(0, 0, 0, 0.55),
-    inset 6px 4px 10px rgba(255, 246, 232, 0.12),
-    0 0 16px 3px rgba(180, 190, 210, 0.16);
+  width: min(5vw, 56px);
+  height: min(5vw, 56px);
+  transform: translate3d(10vw, 64vh, 0);
+}
+.cosmos-body-globe {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  -webkit-mask-image: radial-gradient(circle closest-side at center, #000 98.2%, transparent 100%);
+  mask-image: radial-gradient(circle closest-side at center, #000 98.2%, transparent 100%);
 }
 .cosmos-body-tex {
   position: absolute;
@@ -115,16 +131,16 @@ html, body {
   height: 100%;
   object-fit: cover;
   border-radius: 50%;
-  animation: cosmosTexSpin 80s linear infinite;
+  animation: cosmosTexSpin 90s linear infinite;
 }
-.cosmos-moon .cosmos-body-tex { animation-duration: 110s; }
+.cosmos-moon .cosmos-body-tex { animation-duration: 120s; }
 .cosmos-body-shade {
   position: absolute;
   inset: 0;
   border-radius: 50%;
   background:
-    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.16), transparent 28%),
-    linear-gradient(125deg, transparent 58%, rgba(0, 0, 0, 0.28) 100%);
+    radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.12), transparent 26%),
+    linear-gradient(128deg, transparent 62%, rgba(0, 0, 0, 0.22) 100%);
   pointer-events: none;
 }
 @keyframes cosmosTexSpin {
@@ -134,43 +150,71 @@ html, body {
 .cosmos-comet {
   position: absolute;
   left: 0; top: 0;
-  width: min(34vw, 340px);
+  width: min(22vw, 220px);
+  height: 18px;
+  opacity: 0;
+  transform-origin: right center;
+  pointer-events: none;
+}
+.cosmos-comet-dust {
+  position: absolute;
+  right: 6px; top: 50%;
+  width: 78%;
   height: 5px;
+  margin-top: -2.5px;
   border-radius: 999px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 246, 232, 0.08) 16%,
-    rgba(232, 93, 42, 0.55) 58%,
-    rgba(255, 246, 232, 0.95) 88%,
-    #fff 100%
+    rgba(232, 176, 118, 0.0) 18%,
+    rgba(232, 176, 118, 0.12) 62%,
+    rgba(255, 236, 210, 0.28) 92%,
+    transparent 100%
   );
-  box-shadow: 0 0 18px 4px rgba(232, 93, 42, 0.45);
-  opacity: 0;
-  transform-origin: right center;
+  filter: blur(2.4px);
 }
-.cosmos-comet::after {
-  content: "";
+.cosmos-comet-ion {
   position: absolute;
-  right: -7px; top: 50%;
-  width: 14px; height: 14px;
-  margin-top: -7px;
-  border-radius: 50%;
-  background: #fff8ee;
-  box-shadow: 0 0 18px 6px rgba(232, 93, 42, 0.8);
+  right: 5px; top: 50%;
+  width: 100%;
+  height: 1.25px;
+  margin-top: -0.6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(210, 226, 255, 0.0) 10%,
+    rgba(210, 226, 255, 0.28) 46%,
+    rgba(255, 252, 245, 0.88) 88%,
+    transparent 100%
+  );
 }
-.cosmos-comet--b { width: min(26vw, 260px); height: 4px; }
-.cosmos-comet--c { width: min(42vw, 400px); height: 6px; }
+.cosmos-comet-head {
+  position: absolute;
+  right: 2px; top: 50%;
+  width: 4px; height: 4px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: #fffdf6;
+  box-shadow:
+    0 0 6px 1.5px rgba(255, 246, 230, 0.65),
+    0 0 12px 3px rgba(186, 214, 255, 0.2);
+}
+.cosmos-comet--b {
+  width: min(16vw, 150px);
+  height: 14px;
+}
+.cosmos-comet--b .cosmos-comet-dust { height: 3px; margin-top: -1.5px; filter: blur(1.8px); }
 .cosmos-comet.is-flying {
-  animation: cosmosCometFly var(--dur, 4s) linear forwards;
+  animation: cosmosCometFly var(--dur, 1.4s) cubic-bezier(0.22, 0.12, 0.28, 1) forwards;
 }
 @keyframes cosmosCometFly {
   0% {
     opacity: 0;
     transform: translate(var(--cx), var(--cy)) rotate(var(--rot));
   }
-  10% { opacity: 1; }
-  82% { opacity: 1; }
+  8% { opacity: 1; }
+  62% { opacity: 1; }
   100% {
     opacity: 0;
     transform: translate(var(--dx), var(--dy)) rotate(var(--rot));
@@ -1397,41 +1441,44 @@ footer {
    ═══════════════════════════════════════════════════════════════ */
 
 html[data-theme="dark"] {
-  --paper: #17181b;
-  --paper-raised: #1e2023;
-  --paper-dim: #141518;
-  --ink: #ece7dd;
-  --ink-70: rgba(236, 231, 221, 0.72);
-  --ink-50: rgba(236, 231, 221, 0.5);
-  --ink-30: rgba(236, 231, 221, 0.3);
-  --ink-12: rgba(236, 231, 221, 0.12);
-  --line: rgba(236, 231, 221, 0.14);
-  --line-strong: rgba(236, 231, 221, 0.32);
-  --grid: rgba(236, 231, 221, 0.04);
+  --paper: #100e0c;
+  --paper-raised: #1a1714;
+  --paper-dim: #0c0b0a;
+  --ink: #f3eee4;
+  --ink-70: rgba(243, 238, 228, 0.74);
+  --ink-50: rgba(243, 238, 228, 0.52);
+  --ink-30: rgba(243, 238, 228, 0.32);
+  --ink-12: rgba(243, 238, 228, 0.12);
+  --line: rgba(243, 238, 228, 0.12);
+  --line-strong: rgba(243, 238, 228, 0.28);
+  --grid: rgba(243, 238, 228, 0.03);
   --accent: #ff7a45;
   --accent-ink: #ff9a6b;
-  --accent-glow: rgba(255, 122, 69, 0.12);
+  --accent-glow: rgba(255, 122, 69, 0.14);
   --amber: #d9ad4e;
   --olive: #93a85e;
   --oxide: #d96a52;
   --slate: #7d9bb0;
 
-  /* dark glass tokens */
-  --glass-bg: rgba(22, 20, 18, 0.92);
-  --glass-border: rgba(236, 231, 221, 0.1);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.2);
-  --glass-shadow-hover: 0 20px 60px rgba(255, 122, 69, 0.1), 0 4px 16px rgba(0, 0, 0, 0.3);
-  --glass-inner-glow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --glass-bg: rgba(16, 14, 12, 0.94);
+  --glass-border: rgba(243, 238, 228, 0.1);
+  --glass-shadow: 0 10px 36px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.25);
+  --glass-shadow-hover: 0 22px 64px rgba(255, 122, 69, 0.12), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --glass-inner-glow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 
   color-scheme: dark;
 }
 
-html[data-theme="dark"] .cosmos-sky { opacity: 0.55; }
+html[data-theme="dark"] .cosmos-sky { opacity: 0.68; }
+html[data-theme="dark"] .cosmos-stars { opacity: 0.7; }
 html[data-theme="dark"] .cosmos-sky-veil {
   background:
-    radial-gradient(ellipse 44% 42% at 94% -2%, rgba(8, 7, 6, 1) 0%, rgba(8, 7, 6, 0.9) 30%, transparent 64%),
-    radial-gradient(ellipse 90% 80% at 50% 40%, transparent 38%, rgba(8, 7, 6, 0.35) 100%),
-    linear-gradient(180deg, rgba(8, 7, 6, 0.12), rgba(8, 7, 6, 0.48));
+    radial-gradient(ellipse 36% 34% at 94% -4%, rgba(8, 7, 6, 0.88) 0%, transparent 56%),
+    radial-gradient(ellipse 90% 80% at 50% 40%, transparent 48%, rgba(8, 7, 6, 0.28) 100%),
+    linear-gradient(180deg, rgba(8, 7, 6, 0.06), rgba(8, 7, 6, 0.36));
+}
+html[data-theme="dark"] .hero {
+  background-image: none;
 }
 
 /* panels & commandbar */
