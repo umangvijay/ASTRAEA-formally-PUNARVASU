@@ -67,10 +67,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434/v1"  # local, no key, always available route
     # Vertex AI (GCloud) — ADC / access token / API key; same Gemini models, billed to the project
     vertex_project: str = ""
-    vertex_location: str = "us-central1"
+    vertex_location: str = "global"
     vertex_access_token: str = ""
     vertex_api_key: str = ""
-    vertex_default_model: str = "gemini-2.5-flash"
+    vertex_default_model: str = "gemini-3.8-flash"
     # Anthropic Claude (optional)
     anthropic_api_key: str = ""
     anthropic_default_model: str = "claude-sonnet-4-20250514"
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # General-chat quality first; the SQL champion is only routed to by explicit
     # model hint ("pvu-sql"/"model_forge") — never as the default brain.
     llm_provider_order: str = "vertex,gemini,anthropic,groq,ollama,model_forge,mlx_local"
-    gemini_default_model: str = "gemini-2.5-flash"
+    gemini_default_model: str = "gemini-3.8-flash"
     groq_default_model: str = "llama-3.3-70b-versatile"
     ollama_default_model: str = "llama3.2"
     llm_timeout_seconds: int = 60

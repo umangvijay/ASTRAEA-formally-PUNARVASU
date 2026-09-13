@@ -63,7 +63,13 @@ def _vertex_adc_token() -> str:
         if not creds.valid:
             creds.refresh(Request())
         token = creds.token or ""
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Vertex ADC unavailable: %s: %s",
+            type(exc).__name__,
+            str(exc),
+        )
         token = ""
     _adc_token = (now, token)
     return token
@@ -350,8 +356,9 @@ def _gemini_or_vertex_url(provider: str, model: str) -> tuple[str, dict]:
     if provider == "vertex":
         loc, proj = settings.vertex_location, settings.vertex_project
         model = model.removeprefix("vertex/")
+        host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
         url = (
-            f"https://{loc}-aiplatform.googleapis.com/v1/projects/{proj}/locations/{loc}"
+            f"https://{host}/v1/projects/{proj}/locations/{loc}"
             f"/publishers/google/models/{model}:streamGenerateContent?alt=sse"
         )
         token = settings.vertex_access_token or _vertex_adc_token()
