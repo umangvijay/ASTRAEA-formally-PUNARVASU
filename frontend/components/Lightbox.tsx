@@ -29,10 +29,12 @@ export function LightboxGrid({ plates }: { plates: Plate[] }) {
             <button type="button" className="plate-hit" onClick={() => setOpen(p)} aria-label={`Open ${p.title}`}>
               <img className="plate-art" src={p.image} alt={p.title} width={640} height={400} />
             </button>
-            <Link href={p.href} className="label label--accent" style={{ margin: "12px 16px 0", display: "inline-block" }}>
-              {p.title}
-            </Link>
-            <p>{p.caption}</p>
+            <div className="plate-cap">
+              <Link href={p.href} className="label label--accent">
+                {p.title}
+              </Link>
+              <p>{p.caption}</p>
+            </div>
           </article>
         ))}
       </div>
@@ -40,7 +42,7 @@ export function LightboxGrid({ plates }: { plates: Plate[] }) {
         <div className="lightbox" onClick={() => setOpen(null)} role="dialog" aria-modal>
           <figure className="lightbox-card glass-elevated" onClick={(e) => e.stopPropagation()}>
             <img className="plate-art plate-art--lg" src={open.image} alt={open.title} width={960} height={600} />
-            <figcaption>
+            <figcaption className="plate-cap">
               <span className="label label--accent">{open.title}</span>
               <p>{open.caption}</p>
             </figcaption>

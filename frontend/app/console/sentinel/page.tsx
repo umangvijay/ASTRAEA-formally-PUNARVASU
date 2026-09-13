@@ -61,7 +61,7 @@ export default function SentinelPage() {
       <div className="pagehead">
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
           <span className={`dot ${live ? "dot--live" : "dot--olive"}`} />
-          <span className="label label--accent">◈ SENTINEL · LLM SECURITY GATEWAY</span>
+          <span className="label label--accent">SENTINEL · LLM SECURITY GATEWAY</span>
         </div>
         <h1 className="display">Sentinel.</h1>
         <p>

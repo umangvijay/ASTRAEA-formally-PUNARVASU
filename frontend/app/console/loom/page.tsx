@@ -67,7 +67,7 @@ export default function LoomPage() {
   return (
     <>
       <div className="pagehead">
-        <span className="label label--accent">◈ your agents&apos; shared memory</span>
+        <span className="label label--accent">MEMORY · LOOM</span>
         <h1 className="display">Memory.</h1>
         <p>
           Every incident MEDIC investigated, every attack SHIELD contained, every booking VAANI

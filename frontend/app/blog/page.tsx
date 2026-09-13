@@ -59,10 +59,12 @@ export default function Blog() {
   return (
     <>
       <PublicNav />
-      <section className="hero" style={{ padding: "60px 34px 30px" }}>
-        <span className="label label--accent">BLOG</span>
-        <h1 className="display" style={{ marginTop: 12 }}>Stories from the crew.</h1>
-        <p className="lead">Write about your experience with the agents, share automations, teach the community. Sign in to publish.</p>
+      <section className="hero">
+        <div className="observatory-plaque">
+          <span className="label label--accent">BLOG</span>
+          <h1 className="display" style={{ marginTop: 12 }}>Stories from the crew.</h1>
+          <p className="lead">Write about your experience with the agents, share automations, teach the community. Sign in to publish.</p>
+        </div>
       </section>
       <section className="section" style={{ paddingTop: 10 }}>
         {signedIn && !writing && (
@@ -100,7 +102,7 @@ export default function Blog() {
           </div>
         ))}
       </section>
-      <footer style={{ padding: "26px 34px", borderTop: "1px solid var(--line)" }}>
+      <footer className="site-footer">
         <span className="label">© 2026 Astraea</span>
       </footer>
     </>

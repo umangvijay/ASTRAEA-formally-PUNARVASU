@@ -81,7 +81,7 @@ export default function ModuleWorkbench({ codename }: { codename: string }) {
 
       <div className="footer-strip">
         {CORE_SERVICES.map((s) => (
-          <span key={s.codename} className="label">◈ {s.name} · phase {s.phase}</span>
+          <span key={s.codename} className="label">{s.name} · phase {s.phase}</span>
         ))}
       </div>
     </>

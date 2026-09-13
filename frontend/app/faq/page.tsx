@@ -14,16 +14,18 @@ const FAQS = [
   ["What is the shared memory (LOOM)?", "LOOM is the context fabric: one store where every agent writes what it learns, stamped with origin (FROM SHIELD) and usage (USED BY MEDIC). Switch products tomorrow — everything is already known, no re-onboarding."],
   ["How does the self-evolving engine work?", "FORGE mines failures from real agent runs, proposes new tools or prompt patches, evaluates them on a verifiable task suite and promotes only measured improvements — every change committed to the agent's own git repo."],
   ["Is the voice agent real-time?", "VAANI in this build is a browser WebSocket + ScriptProcessor. Exotel/PSTN only if you set ASTRAEA_VAANI_TELEPHONY. The <100ms barge-in number is a target, not a published load-test."],
-  ["What themes are available?", "Light (Blueprint — warm paper and ink) and Dark (control room — desaturated graphite). Toggle from the command bar or the login page; your choice persists."],
+  ["What themes are available?", "Night (observatory — charcoal sky, cream plates, oxide labels) and Day (cream paper over the same sky). Toggle from the nav; your choice persists."],
 ];
 
 export default function FAQ() {
   return (
     <>
       <PublicNav />
-      <section className="hero" style={{ padding: "60px 34px 30px" }}>
-        <span className="label label--accent">FAQ</span>
-        <h1 className="display" style={{ marginTop: 12 }}>Questions, answered.</h1>
+      <section className="hero">
+        <div className="observatory-plaque">
+          <span className="label label--accent">FAQ</span>
+          <h1 className="display" style={{ marginTop: 12 }}>Questions, answered.</h1>
+        </div>
       </section>
       <section className="section" style={{ paddingTop: 10 }}>
         {FAQS.map(([q, a]) => (
@@ -33,7 +35,7 @@ export default function FAQ() {
           </div>
         ))}
       </section>
-      <footer style={{ padding: "26px 34px", borderTop: "1px solid var(--line)" }}>
+      <footer className="site-footer">
         <span className="label">© 2026 Astraea</span>
       </footer>
     </>

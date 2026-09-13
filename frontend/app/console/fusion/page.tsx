@@ -99,7 +99,7 @@ export default function FusionPage() {
   return (
     <>
       <div className="pagehead">
-        <span className="label label--accent">◈ mission control — start work, then watch it happen</span>
+        <span className="label label--accent">FUSION · MISSION CONTROL</span>
         <h1 className="display">Fusion.</h1>
         <p>
           Start any job, then follow everything your agents do in one live feed —

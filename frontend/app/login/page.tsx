@@ -55,23 +55,20 @@ export default function LoginPage() {
   }
 
   return (
-    <>
-    <div style={{ position: "fixed", top: 14, right: 16, zIndex: 60 }}><ThemeToggle /></div>
     <div className="login-wrap">
-      <section className="login-left sheet">
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Link href="/" className="wordmark" style={{ fontSize: 15 }}>ASTRAEA<em>.</em></Link>
-          <Link href="/" className="label" style={{ color: "var(--ink-50)" }}>← home</Link>
+      <header className="login-top">
+        <div className="login-brand">
+          <Link href="/" className="wordmark" style={{ fontSize: 14 }}>ASTRAEA<em>.</em></Link>
+          <Link href="/" className="label login-home">← home</Link>
         </div>
+        <ThemeToggle />
+      </header>
+
+      <section className="login-left">
         <h1 className="display manifesto">
-          Agents that do the <em>work of humans</em> — watched, approved and remembered.
+          Agents that do the <em>work of</em> humans — watched, approved
+          and remembered.
         </h1>
-        <div>
-          <p className="label">v0.3.0 · full platform — data stays on this machine</p>
-          <p className="label" style={{ marginTop: 6 }}>
-            medic · operator · shield · vaani · forge · model-forge
-          </p>
-        </div>
       </section>
 
       <section className="login-right">
@@ -127,17 +124,21 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <button className="btn btn--ghost" disabled={busy} onClick={guest} style={{ width: "100%", marginTop: 6 }}>
+          <button className="btn btn--ghost" disabled={busy} onClick={guest} style={{ width: "100%", marginTop: 10 }}>
             Or continue as guest (30 min) →
           </button>
-          <p className="label" style={{ marginTop: 18, lineHeight: 1.8 }}>
+          <p className="label login-loom">
             registering creates your personal workspace — every module you use
-            <br />
             later will already know you. that is the loom promise.
           </p>
         </div>
       </section>
+
+      <p className="label login-meta">
+        v0.3.0 · full platform — data stays on this machine
+        <br />
+        medic · operator · shield · vaani · forge · model-forge
+      </p>
     </div>
-    </>
   );
 }

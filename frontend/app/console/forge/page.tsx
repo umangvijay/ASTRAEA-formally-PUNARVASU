@@ -52,7 +52,7 @@ export default function ForgePage() {
     <>
       <div className="pagehead">
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
-          <span className="label label--accent">◈ FORGE · SELF-EVOLVING ENGINE</span>
+          <span className="label label--accent">FORGE · SELF-EVOLVING ENGINE</span>
           <span className="stamp stamp--phase">PHASE 6</span>
         </div>
         <h1 className="display">FORGE.</h1>

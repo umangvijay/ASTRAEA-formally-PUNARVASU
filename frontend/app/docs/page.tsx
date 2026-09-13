@@ -22,8 +22,8 @@ export default function Docs() {
   return (
     <>
       <span className="label label--accent">OBSERVATORY · START HERE</span>
-      <h1 className="display">Command dashboard.</h1>
-      <p style={{ color: "var(--ink-70)", fontSize: 15, maxWidth: 640 }}>
+      <h1 className="display serif">Command dashboard.</h1>
+      <p className="section-lead" style={{ marginTop: 8 }}>
         Same view as the console, explained. Plates below are the six workbenches.
         Core services sit under them. Nothing here is a canned demo page.
       </p>

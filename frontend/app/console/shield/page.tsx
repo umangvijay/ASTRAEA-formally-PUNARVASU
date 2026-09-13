@@ -69,7 +69,7 @@ export default function ShieldPage() {
       <div className="pagehead">
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
           <span className={`dot ${live ? "dot--live" : "dot--olive"}`} />
-          <span className="label label--accent">◈ SHIELD · AI SOC ANALYST</span>
+          <span className="label label--accent">SHIELD · AI SOC ANALYST</span>
           <span className="stamp stamp--phase">PHASE 4</span>
         </div>
         <h1 className="display">SHIELD.</h1>

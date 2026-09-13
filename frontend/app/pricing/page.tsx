@@ -5,10 +5,12 @@ export default function Pricing() {
   return (
     <>
       <PublicNav />
-      <section className="hero" style={{ padding: "60px 34px 30px" }}>
-        <span className="label label--accent">PRICING</span>
-        <h1 className="display" style={{ marginTop: 12 }}>Start free. Scale when it works.</h1>
-        <p className="lead">Every plan includes all six agents, the shared memory and the security gateway. You pay for capacity, not features.</p>
+      <section className="hero">
+        <div className="observatory-plaque">
+          <span className="label label--accent">PRICING</span>
+          <h1 className="display" style={{ marginTop: 12 }}>Start free. Scale when it works.</h1>
+          <p className="lead">Every plan includes all six agents, the shared memory and the security gateway. You pay for capacity, not features.</p>
+        </div>
       </section>
       <section className="section" style={{ paddingTop: 10 }}>
         <div className="cards3">
@@ -48,7 +50,7 @@ export default function Pricing() {
           </div>
         </div>
       </section>
-      <footer style={{ padding: "26px 34px", borderTop: "1px solid var(--line)" }}>
+      <footer className="site-footer">
         <span className="label">© 2026 Astraea · prices in INR, exclusive of GST</span>
       </footer>
     </>

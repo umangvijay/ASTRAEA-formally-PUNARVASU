@@ -33,10 +33,12 @@ export default function Contact() {
   return (
     <>
       <PublicNav />
-      <section className="hero" style={{ padding: "60px 34px 30px" }}>
-        <span className="label label--accent">CONTACT US</span>
-        <h1 className="display" style={{ marginTop: 12 }}>Let&apos;s talk.</h1>
-        <p className="lead">Questions, partnerships, enterprise deployments — send a message and we&apos;ll get back to you.</p>
+      <section className="hero">
+        <div className="observatory-plaque">
+          <span className="label label--accent">CONTACT US</span>
+          <h1 className="display" style={{ marginTop: 12 }}>Let&apos;s talk.</h1>
+          <p className="lead">Questions, partnerships, enterprise deployments — send a message and we&apos;ll get back to you.</p>
+        </div>
       </section>
       <section className="section" style={{ paddingTop: 10 }}>
         <div className="cards3">
@@ -58,7 +60,7 @@ export default function Contact() {
               <p style={{ fontSize: 13.5, color: "var(--ink-70)", margin: "6px 0 0" }}>Usually within 24 hours. Enterprise queries are prioritised.</p>
             </div>
           </div>
-          <div className="panel glass" style={{ gridColumn: "span 2" }}>
+          <div className="panel glass span-all">
             {sent ? (
               <div style={{ textAlign: "center", padding: 30 }}>
                 <h3 className="display">Message sent ✓</h3>
@@ -87,7 +89,7 @@ export default function Contact() {
           </div>
         </div>
       </section>
-      <footer style={{ padding: "26px 34px", borderTop: "1px solid var(--line)" }}>
+      <footer className="site-footer">
         <span className="label">© 2026 Astraea</span>
       </footer>
     </>

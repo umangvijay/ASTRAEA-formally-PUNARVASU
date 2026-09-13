@@ -22,7 +22,7 @@ export function ThemeToggle() {
   const { theme, toggle } = useTheme();
   return (
     <button className="theme-toggle" onClick={toggle} aria-label="toggle theme">
-      {theme === "dark" ? "☀ LIGHT" : "☾ DARK"}
+      {theme === "dark" ? "+ Day" : "+ Night"}
     </button>
   );
 }

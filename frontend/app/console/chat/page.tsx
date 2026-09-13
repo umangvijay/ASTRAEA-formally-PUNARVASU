@@ -55,7 +55,7 @@ export default function ChatPage() {
   return (
     <>
       <div className="pagehead">
-        <span className="label label--accent">◈ SENTINEL CHAT</span>
+        <span className="label label--accent">SENTINEL · CHAT</span>
         <h1 className="display">Talk to the plane.</h1>
         <p>
           Every turn goes through SENTINEL. Empty messages are rejected.
@@ -69,14 +69,14 @@ export default function ChatPage() {
             <p className="label">no turns yet — ask about a run, a page, or a booking</p>
           )}
           {messages.map((m, i) => (
-            <article key={i} className="panel" style={{ padding: 12 }}>
+            <article key={i} className={`chat-turn chat-turn--${m.role}`}>
               <p className="label label--ink">{m.role}</p>
               <p style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontSize: 14 }}>{m.content}</p>
             </article>
           ))}
         </div>
         {note && <p className="label label--accent">{note}</p>}
-        <form onSubmit={send} style={{ display: "flex", gap: 10, alignItems: "end" }}>
+        <form className="composer-row" onSubmit={send}>
           <div className="field" style={{ flex: 1, marginBottom: 0 }}>
             <input
               value={text}

@@ -69,7 +69,7 @@ export default function MedicPage() {
       <div className="pagehead">
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
           <span className={`dot ${live ? "dot--live" : "dot--olive"}`} />
-          <span className="label label--accent">◈ MEDIC · AI SRE</span>
+          <span className="label label--accent">MEDIC · AI SRE</span>
           <span className="stamp stamp--phase">PHASE 2</span>
         </div>
         <h1 className="display">MEDIC.</h1>

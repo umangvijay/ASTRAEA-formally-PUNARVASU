@@ -102,11 +102,75 @@ def milkyway(w=1600, h=900):
     return img
 
 
+def mercury_color(dx, dy, z, light):
+    n = math.sin(dx * 9 + dy * 7) * math.sin(dx * 4 - dy * 6)
+    base = (138 + int(n * 22), 128 + int(n * 16), 112 + int(n * 10))
+    shade = 0.22 + 0.78 * light
+    return tuple(min(255, max(30, int(c * shade))) for c in base)
+
+
+def venus_color(dx, dy, z, light):
+    band = math.sin(dy * 8 + dx * 2.2)
+    base = (214, 168 + int(band * 18), 92 + int(band * 12))
+    shade = 0.35 + 0.65 * light
+    return tuple(min(255, int(c * shade)) for c in base)
+
+
+def mars_color(dx, dy, z, light):
+    cap = 1 if abs(dy) > 0.72 else 0
+    n = math.sin(dx * 6 + dy * 5)
+    if cap:
+        base = (232, 228, 220)
+    else:
+        base = (168 + int(n * 20), 72 + int(n * 10), 48)
+    shade = 0.24 + 0.76 * light
+    return tuple(min(255, int(c * shade)) for c in base)
+
+
+def jupiter_color(dx, dy, z, light):
+    band = math.sin(dy * 14 + dx * 0.8)
+    storm = (dx + 0.28) ** 2 + (dy - 0.12) ** 2 < 0.018
+    if storm:
+        base = (196, 92, 48)
+    elif band > 0.35:
+        base = (210, 168, 118)
+    elif band < -0.35:
+        base = (148, 102, 70)
+    else:
+        base = (186, 140, 96)
+    shade = 0.3 + 0.7 * light
+    return tuple(min(255, int(c * shade)) for c in base)
+
+
+def saturn_color(dx, dy, z, light):
+    band = math.sin(dy * 10)
+    base = (214, 186 + int(band * 12), 118)
+    shade = 0.32 + 0.68 * light
+    return tuple(min(255, int(c * shade)) for c in base)
+
+
+def neptune_color(dx, dy, z, light):
+    n = math.sin(dx * 5 + dy * 4)
+    base = (48 + int(n * 12), 92 + int(n * 18), 186)
+    shade = 0.28 + 0.72 * light
+    return tuple(min(255, int(c * shade)) for c in base)
+
+
+def write_planets() -> None:
+    sphere_shade(192, mercury_color, (160, 150, 140)).save(OUT / "mercury.png")
+    sphere_shade(256, venus_color, (230, 190, 120)).save(OUT / "venus.png")
+    sphere_shade(256, mars_color, (210, 120, 80)).save(OUT / "mars.png")
+    sphere_shade(384, jupiter_color, (220, 180, 130)).save(OUT / "jupiter.png")
+    sphere_shade(320, saturn_color, (230, 200, 140)).save(OUT / "saturn.png")
+    sphere_shade(256, neptune_color, (120, 160, 230)).save(OUT / "neptune.png")
+
+
 def main() -> None:
     sphere_shade(512, earth_color, (90, 170, 230)).save(OUT / "earth.png")
     sphere_shade(256, moon_color, (200, 200, 196)).save(OUT / "moon.png")
     sun().save(OUT / "sun.png")
     milkyway().save(OUT / "milkyway.png", quality=86)
+    write_planets()
     print("wrote", OUT)
 
 

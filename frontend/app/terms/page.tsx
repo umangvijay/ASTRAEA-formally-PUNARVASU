@@ -4,9 +4,11 @@ export default function Terms() {
   return (
     <>
       <PublicNav />
-      <section className="hero" style={{ padding: "60px 34px 30px" }}>
-        <span className="label label--accent">TERMS</span>
-        <h1 className="display" style={{ marginTop: 12 }}>Terms of Service.</h1>
+      <section className="hero">
+        <div className="observatory-plaque">
+          <span className="label label--accent">TERMS</span>
+          <h1 className="display" style={{ marginTop: 12 }}>Terms of Service.</h1>
+        </div>
       </section>
       <section className="section" style={{ paddingTop: 10 }}>
         <div className="faq-item"><h3>1. Acceptance</h3><p>By using Astraea you agree to these terms. If you don&apos;t agree, don&apos;t use the platform.</p></div>
@@ -15,7 +17,7 @@ export default function Terms() {
         <div className="faq-item"><h3>4. Security</h3><p>We apply Argon2id password hashing, JWT sessions, security headers, rate limiting and sandboxed execution — but no system is perfect. Report vulnerabilities to umangvijay025@gmail.com.</p></div>
         <div className="faq-item"><h3>5. Liability</h3><p>Astraea is provided without warranty. We are not liable for indirect damages arising from agent actions taken under your approval.</p></div>
       </section>
-      <footer style={{ padding: "26px 34px", borderTop: "1px solid var(--line)" }}>
+      <footer className="site-footer">
         <span className="label">© 2026 Astraea</span>
       </footer>
     </>

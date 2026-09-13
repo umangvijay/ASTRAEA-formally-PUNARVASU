@@ -74,7 +74,7 @@ export default function OverviewPage() {
   return (
     <>
       <div className="pagehead">
-        <span className="label label--accent">◈ observatory · command overview</span>
+        <span className="label label--accent">OBSERVATORY · COMMAND OVERVIEW</span>
         <h1 className="display">Good day, operator.</h1>
         <p>
           Six workbenches share SENTINEL, Runs and Memory. This is a lab control
@@ -209,7 +209,7 @@ export default function OverviewPage() {
         <div className="glass-card panel--accent" style={{ padding: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 260 }}>
-              <p className="label label--accent">◈ mission control · every agent on one screen</p>
+              <p className="label label--accent">FUSION · EVERY AGENT ON ONE SCREEN</p>
               <h2 className="display" style={{ margin: "6px 0 4px", fontSize: 24 }}>Fusion</h2>
               <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-70)" }}>
                 The live feed of everything your agents are doing — and everything waiting for your decision.

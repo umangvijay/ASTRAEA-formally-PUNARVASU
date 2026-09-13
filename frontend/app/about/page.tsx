@@ -4,10 +4,12 @@ export default function About() {
   return (
     <>
       <PublicNav />
-      <section className="hero" style={{ padding: "60px 34px 40px" }}>
-        <span className="label label--accent">ABOUT</span>
-        <h1 className="display" style={{ marginTop: 12 }}>Built on a Sanskrit star, engineered for the long run.</h1>
-        <p className="lead">Astraea (the star of return) is the Vedic nakshatra of renewal — “return of the light”. Our runtime earns the name: agent runs that die come back exactly where they stopped.</p>
+      <section className="hero">
+        <div className="observatory-plaque">
+          <span className="label label--accent">ABOUT</span>
+          <h1 className="display" style={{ marginTop: 12 }}>Built on a Sanskrit star, engineered for the long run.</h1>
+          <p className="lead">Astraea (the star of return) is the Vedic nakshatra of renewal — “return of the light”. Our runtime earns the name: agent runs that die come back exactly where they stopped.</p>
+        </div>
       </section>
       <section className="section">
         <div className="cards3">
@@ -16,7 +18,7 @@ export default function About() {
           <div className="panel glass"><h3 style={{ marginTop: 0 }}>The promise</h3><p style={{ fontSize: 14, color: "var(--ink-70)", margin: 0 }}>Start with one product today, adopt five more next quarter — the platform already knows you. Provenance on everything; your data stays yours.</p></div>
         </div>
       </section>
-      <footer style={{ padding: "26px 34px", borderTop: "1px solid var(--line)" }}>
+      <footer className="site-footer">
         <span className="label">© 2026 Astraea</span>
       </footer>
     </>

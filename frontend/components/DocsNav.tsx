@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 
 const SECTIONS: { group: string; pages: { href: string; label: string; blurb: string }[] }[] = [
   {
@@ -45,19 +46,45 @@ const SECTIONS: { group: string; pages: { href: string; label: string; blurb: st
 
 export function DocsNav() {
   const pathname = usePathname();
+  const box = useRef<HTMLDetailsElement>(null);
+  const current = SECTIONS.flatMap((s) => s.pages).find((p) => p.href === pathname);
+
+  useEffect(() => {
+    const apply = () => {
+      const el = box.current;
+      if (!el) return;
+      if (window.matchMedia("(max-width: 720px)").matches) {
+        el.removeAttribute("open");
+      } else {
+        el.setAttribute("open", "");
+      }
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, [pathname]);
+
   return (
     <aside className="docs-side">
-      {SECTIONS.map((s) => (
-        <div key={s.group} style={{ marginBottom: 18 }}>
-          <p className="label label--ink" style={{ margin: "0 0 6px" }}>{s.group.toUpperCase()}</p>
-          {s.pages.map((p) => (
-            <Link key={p.href} href={p.href} className={`docs-link ${pathname === p.href ? "active" : ""}`}>
-              <b>{p.label}</b>
-              <span>{p.blurb}</span>
-            </Link>
+      <details ref={box} className="docs-menu" open>
+        <summary className="docs-menu-sum">
+          <span className="label label--accent">SKY MAP</span>
+          <span className="docs-menu-now">{current?.label ?? "Start here"}</span>
+        </summary>
+        <div className="docs-menu-body">
+          {SECTIONS.map((s) => (
+            <div key={s.group} className="docs-group">
+              <p className="label label--ink" style={{ margin: "0 0 6px" }}>{s.group.toUpperCase()}</p>
+              {s.pages.map((p) => (
+                <Link key={p.href} href={p.href} className={`docs-link ${pathname === p.href ? "active" : ""}`}>
+                  <b>{p.label}</b>
+                  <span>{p.blurb}</span>
+                </Link>
+              ))}
+            </div>
           ))}
         </div>
-      ))}
+      </details>
     </aside>
   );
 }

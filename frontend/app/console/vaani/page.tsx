@@ -127,7 +127,7 @@ export default function VaaniPage() {
       <div className="pagehead">
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
           <span className={`dot ${connected ? "dot--live" : ""}`} />
-          <span className="label label--accent">◈ VAANI · VOICE AI EMPLOYEE</span>
+          <span className="label label--accent">VAANI · VOICE AI EMPLOYEE</span>
           <span className="stamp stamp--phase">PHASE 5</span>
         </div>
         <h1 className="display">VAANI.</h1>
@@ -178,7 +178,7 @@ export default function VaaniPage() {
       </div>
 
       {/* ── Two columns: transcript + bookings ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 26 }}>
+      <div className="split-2" style={{ marginBottom: 26 }}>
         {/* Transcript */}
         <div className="glass-card sheet" style={{ padding: 0, minHeight: 200 }}>
           <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--line)" }}>

@@ -68,6 +68,10 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
     return () => clearInterval(t);
   }, [router]);
 
+  useEffect(() => {
+    document.querySelectorAll(".bar-menu[open]").forEach((el) => el.removeAttribute("open"));
+  }, [pathname]);
+
   if (!checked) {
     return (
       <>
@@ -93,6 +97,23 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         <Link href="/console" className="wordmark">
           ASTRAEA<em>.</em>
         </Link>
+        <details className="bar-menu">
+          <summary>Menu</summary>
+          <div className="bar-menu-panel">
+            {NAV.flatMap((g) => g.links).map((l) => (
+              <Link key={l.href} href={l.href} className={l.match(pathname) ? "active" : ""}>
+                {l.label}
+              </Link>
+            ))}
+            <p className="label label--accent" style={{ margin: "12px 12px 6px" }}>Agents</p>
+            {MODULES.map((m) => (
+              <Link key={m.codename} href={`/console/${m.codename}`}
+                    className={pathname === `/console/${m.codename}` ? "active" : ""}>
+                {m.name}
+              </Link>
+            ))}
+          </div>
+        </details>
         <nav className="commandbar-nav">
           {NAV.map((g) => (
             <span key={g.group} className="nav-group">
@@ -151,7 +172,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         <main className="main">{children}</main>
         <aside className="rail">
           <div>
-            <p className="label label--accent">◈ shared memory · what your agents learned</p>
+            <p className="label label--accent">SHARED MEMORY · WHAT THEY LEARNED</p>
             {loom.length === 0 ? (
               <div className="empty" style={{ marginTop: 10 }}>
                 nothing yet — when your agents work, everything they learn lands here.
