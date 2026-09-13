@@ -12,6 +12,8 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -28,7 +30,6 @@ from app.api.public import router as public_router
 from app.api.fusion import router as fusion_router
 from app.forge.api import router as forge_router
 from app.vaani.api import router as vaani_router
-from app.vaani.gateway import router as vaani_ws
 from app.operator.api import router as operator_router
 from app.sentinel.api import router as sentinel_api
 from app.sentinel.proxy import router as sentinel_proxy
@@ -50,162 +51,184 @@ async def _start_heartbeats() -> None:
     detector.start()
     forge_jobs.start()
     shield_detector.start()
-    if getattr(shield_lab, "_benign_task", None) is None or shield_lab._benign_task.done():
-        shield_lab._benign_task = asyncio.get_running_loop().create_task(shield_lab.benign_loop())
+    from app.pulse import live as pulse_live
+    from app.config import on_cloud_run
+
+    if "pytest" not in sys.modules:
+        pulse_live.start()
+    lab_flag = os.environ.get("ASTRAEA_SHIELD_LAB", "").lower()
+    want_lab = lab_flag in ("1", "true", "yes") or (
+        not on_cloud_run() and not settings.is_production and lab_flag not in ("0", "false", "no")
+    )
+    if want_lab:
+        if getattr(shield_lab, "_benign_task", None) is None or shield_lab._benign_task.done():
+            shield_lab._benign_task = asyncio.get_running_loop().create_task(shield_lab.benign_loop())
     logger.info(
-        "heartbeats on: pulse(%ss) shield(%ss) forge(%ss)",
+        "heartbeats on: pulse(%ss) shield(%ss) forge(%ss) live-telemetry lab=%s",
         settings.detector_interval_seconds,
         settings.shield_detector_interval_seconds,
         settings.forge_consolidator_interval_s,
+        want_lab,
     )
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    await init_db()
-    from app.core.engine import recover_orphans
-    from app.shared.seed import seed, seed_shield, dedupe_guardrail_overrides
+async def lifespan(app: FastAPI):
+    from app.config import apply_production_guards, on_cloud_run
 
-    async with SessionLocal() as db:
-        await seed(db)
-        await seed_shield(db)
-        await dedupe_guardrail_overrides(db)
-    orphaned = await recover_orphans()
-    if orphaned:
-        logger.warning("recovery: %d interrupted run(s) awaiting resume", orphaned)
-
-    # ── ClickHouse telemetry lake (Milestone 4): create tables when configured (sre profile) ──
-    from app.config import settings as _cfg
-
-    if _cfg.clickhouse_url:
-        try:
-            from app.pulse.store import ClickHouseTelemetryStore
-
-            async with SessionLocal() as db:
-                await ClickHouseTelemetryStore(db).ensure_tables()
-            logger.info("clickhouse telemetry store ready at %s", _cfg.clickhouse_url)
-        except Exception:  # noqa: BLE001 — falls back to the sqlite store if CH is down
-            logger.warning("clickhouse ensure_tables failed — telemetry uses sqlite store",
-                           exc_info=True)
-
-    # backfill vector memory for items written before the index existed (idempotent)
-    async def _vector_backfill():
-        try:
-            from sqlalchemy import select as _sel
-
-            from app.loom.models import LoomItem
-            from app.shared import vector
-
-            async with SessionLocal() as db:
-                items = (
-                    (await db.execute(
-                        _sel(LoomItem).order_by(LoomItem.id.desc()).limit(300)
-                    ))
-                    .scalars()
-                    .all()
-                )
-                for item in items:
-                    text = (f"{item.title}\n{item.summary}\n"
-                            f"{json.dumps(item.payload or {}, default=str)[:2000]}")
-                    await vector.aindex_item(
-                        item.id, item.tenant_id, text,
-                        {"origin_module": item.origin_module, "kind": item.kind,
-                         "title": item.title[:200],
-                         "share_with": ",".join(item.share_with or [])},
-                    )
-            logger.info("vector memory: backfilled %d loom items (%s embeddings)",
-                        len(items), vector.embed_kind())
-        except Exception:  # noqa: BLE001 — vector memory is best-effort
-            logger.exception("vector backfill failed")
-
-    asyncio.get_running_loop().create_task(_vector_backfill())
-
-    await _start_heartbeats()
-
-    # ── durable run workers (Milestone 2) ──
-    # In-process pull loop(s): claim queued/interrupted runs and resume lease-expired
-    # (crashed) ones. A standalone worker process can run the same `run_worker` loop.
-    from app.config import settings as _settings
-    from app.core.worker import run_worker
-
+    apply_production_guards()
+    app.state.ready = False
+    app.state.boot_error = None
     worker_stop = asyncio.Event()
-    worker_tasks = [
-        asyncio.get_running_loop().create_task(run_worker(worker_stop))
-        for _ in range(max(1, _settings.run_workers))
-    ]
-    logger.info("started %d durable run worker(s)", len(worker_tasks))
+    worker_tasks: list[asyncio.Task] = []
+    heal_task: asyncio.Task | None = None
 
-    # ── self-healing watchdog ──
-    async def self_heal():
-        """Every 30s: restart dead heartbeats, reset stuck runs, expire old guests.
+    async def _boot() -> None:
+        nonlocal worker_tasks, heal_task
+        await init_db()
+        from app.core.engine import recover_orphans
+        from app.shared.seed import seed, seed_shield, dedupe_guardrail_overrides
 
-        This does not rewrite application code. Schema relaunch is healed by
-        idempotent Alembic revisions (0009/0010) so `create_all` + migrate
-        cannot take the process down.
-        """
-        tick = 0
-        while True:
-            await asyncio.sleep(30)
-            tick += 1
+        async with SessionLocal() as db:
+            await seed(db)
+            await seed_shield(db)
+            await dedupe_guardrail_overrides(db)
+        orphaned = await recover_orphans()
+        if orphaned:
+            logger.warning("recovery: %d interrupted run(s) awaiting resume", orphaned)
+
+        from app.config import settings as _cfg
+
+        if _cfg.clickhouse_url:
             try:
-                # 1. heartbeats: restart anything that died (start() is idempotent)
-                await _start_heartbeats()
+                from app.pulse.store import ClickHouseTelemetryStore
 
-                # 2. runs stuck in "running" for > 5 min (orphaned executor)
-                from sqlalchemy import update
-
-                from app.core.models import Run
-
-                cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5)
                 async with SessionLocal() as db:
-                    result = await db.execute(
-                        update(Run).where(
-                            Run.status == "running",
-                            Run.updated_at < cutoff,
-                        ).values(status="interrupted")
+                    await ClickHouseTelemetryStore(db).ensure_tables()
+                logger.info("clickhouse telemetry store ready at %s", _cfg.clickhouse_url)
+            except Exception:  # noqa: BLE001 — falls back to the sqlite store if CH is down
+                logger.warning("clickhouse ensure_tables failed — telemetry uses sqlite store",
+                               exc_info=True)
+
+        async def _vector_backfill():
+            try:
+                from sqlalchemy import select as _sel
+
+                from app.loom.models import LoomItem
+                from app.shared import vector
+
+                async with SessionLocal() as db:
+                    items = (
+                        (await db.execute(
+                            _sel(LoomItem).order_by(LoomItem.id.desc()).limit(300)
+                        ))
+                        .scalars()
+                        .all()
                     )
-                    if result.rowcount:
-                        await db.commit()
-                        logger.warning("self-heal: %d stuck run(s) → interrupted", result.rowcount)
+                    for item in items:
+                        text = (f"{item.title}\n{item.summary}\n"
+                                f"{json.dumps(item.payload or {}, default=str)[:2000]}")
+                        await vector.aindex_item(
+                            item.id, item.tenant_id, text,
+                            {"origin_module": item.origin_module, "kind": item.kind,
+                             "title": item.title[:200],
+                             "share_with": ",".join(item.share_with or [])},
+                        )
+                logger.info("vector memory: backfilled %d loom items (%s embeddings)",
+                            len(items), vector.embed_kind())
+            except Exception:  # noqa: BLE001 — vector memory is best-effort
+                logger.exception("vector backfill failed")
 
-                # 3. expired guest workspaces (checked every 10 min; only empty ones)
-                if tick % 20 == 0:
-                    from sqlalchemy import delete, select
+        asyncio.get_running_loop().create_task(_vector_backfill())
 
-                    from app.core.models import Run as _Run, Tenant, User
+        await _start_heartbeats()
 
-                    stale = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+        from app.config import settings as _settings
+        from app.core.worker import run_worker
+
+        worker_tasks = [
+            asyncio.get_running_loop().create_task(run_worker(worker_stop))
+            for _ in range(max(1, _settings.run_workers))
+        ]
+        logger.info("started %d durable run worker(s)", len(worker_tasks))
+
+        async def self_heal():
+            """Every 30s: restart dead heartbeats, reset stuck runs, expire old guests."""
+            tick = 0
+            while True:
+                await asyncio.sleep(30)
+                tick += 1
+                try:
+                    await _start_heartbeats()
+
+                    from sqlalchemy import update
+
+                    from app.core.models import Run
+
+                    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5)
                     async with SessionLocal() as db:
-                        guests = (
-                            await db.execute(
-                                select(User).where(
-                                    User.role == "guest",
-                                    User.expires_at.is_not(None),
-                                    User.expires_at < stale,
-                                )
-                            )
-                        ).scalars().all()
-                        removed = 0
-                        for g in guests:
-                            tid = g.tenant_id
-                            has_runs = (await db.execute(
-                                select(_Run.id).where(_Run.tenant_id == tid).limit(1)
-                            )).first()
-                            if has_runs:
-                                continue
-                            await db.execute(delete(User).where(User.id == g.id))
-                            await db.execute(delete(Tenant).where(Tenant.id == tid))
-                            removed += 1
-                        if removed:
+                        result = await db.execute(
+                            update(Run).where(
+                                Run.status == "running",
+                                Run.updated_at < cutoff,
+                            ).values(status="interrupted")
+                        )
+                        if result.rowcount:
                             await db.commit()
-                            logger.info("self-heal: removed %d expired guest workspace(s)", removed)
-            except Exception:  # noqa: BLE001 — self-heal must never crash
-                logger.exception("self-heal tick failed")
+                            logger.warning("self-heal: %d stuck run(s) → interrupted", result.rowcount)
 
-    heal_task = asyncio.get_running_loop().create_task(self_heal())
+                    if tick % 20 == 0:
+                        from sqlalchemy import delete, select
+
+                        from app.core.models import Run as _Run, Tenant, User
+
+                        stale = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+                        async with SessionLocal() as db:
+                            guests = (
+                                await db.execute(
+                                    select(User).where(
+                                        User.role == "guest",
+                                        User.expires_at.is_not(None),
+                                        User.expires_at < stale,
+                                    )
+                                )
+                            ).scalars().all()
+                            removed = 0
+                            for g in guests:
+                                tid = g.tenant_id
+                                has_runs = (await db.execute(
+                                    select(_Run.id).where(_Run.tenant_id == tid).limit(1)
+                                )).first()
+                                if has_runs:
+                                    continue
+                                await db.execute(delete(User).where(User.id == g.id))
+                                await db.execute(delete(Tenant).where(Tenant.id == tid))
+                                removed += 1
+                            if removed:
+                                await db.commit()
+                                logger.info("self-heal: removed %d expired guest workspace(s)", removed)
+                except Exception:  # noqa: BLE001 — self-heal must never crash
+                    logger.exception("self-heal tick failed")
+
+        heal_task = asyncio.get_running_loop().create_task(self_heal())
+        app.state.ready = True
+        logger.info("astraea ready (cloud_run=%s vertex=%s)", on_cloud_run(), bool(settings.vertex_project))
+
+    try:
+        if on_cloud_run():
+            # Bind PORT immediately so Cloud Run does not 500 while sqlite/seed run.
+            asyncio.get_running_loop().create_task(_boot())
+        else:
+            await _boot()
+    except Exception as exc:
+        app.state.boot_error = str(exc)
+        logger.exception("boot failed")
+        if not on_cloud_run():
+            raise
 
     yield
-    heal_task.cancel()
+    if heal_task:
+        heal_task.cancel()
     worker_stop.set()
     for t in worker_tasks:
         t.cancel()
@@ -236,7 +259,9 @@ def create_app() -> FastAPI:
             resp.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
                 "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-                "font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* "
+                "font-src 'self' data:; "
+                "connect-src 'self' http://localhost:* http://127.0.0.1:* "
+                "https://*.run.app https://*.googleapis.com wss://*.run.app "
                 "ws://localhost:* ws://127.0.0.1:*; frame-ancestors 'none'; base-uri 'self'"
             )
             if settings.is_production:
@@ -251,6 +276,12 @@ def create_app() -> FastAPI:
             resp = await call_next(request)
             duration_ms = round((_time.perf_counter() - t0) * 1000, 2)
             resp.headers["X-Request-Time"] = f"{duration_ms}ms"
+            try:
+                from app.pulse import live as pulse_live
+
+                pulse_live.record_request(duration_ms, resp.status_code)
+            except Exception:
+                pass
             if not request.url.path.startswith("/_next"):
                 logger.info(
                     "%s %s → %d (%.1fms)",
@@ -286,6 +317,7 @@ def create_app() -> FastAPI:
     app.include_router(vault_router)
     app.include_router(fusion_router)
     app.include_router(public_router)
+    from app.vaani.gateway import router as vaani_ws
     app.include_router(vaani_ws)
     return app
 

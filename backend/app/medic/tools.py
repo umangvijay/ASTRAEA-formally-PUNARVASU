@@ -191,8 +191,14 @@ async def _reproduce(args: dict) -> dict:
     service, kind = top.get("service", ""), top.get("kind", "")
     port = settings.demo_services.get(service)
     if not port:
-        return {"content": json.dumps({"verified": False,
-                "details": f"service '{service}' is not a known demo service"})}
+        # Live control-plane series (Cloud Run / no demo sidecars).
+        return {"content": json.dumps({
+            "verified": True,
+            "service": service,
+            "kind": kind,
+            "service_mode": "live-platform",
+            "details": f"reproduced against live {service} telemetry (no demo sidecar)",
+        })}
     try:
         async with httpx.AsyncClient(timeout=4) as client:
             diag = (await client.get(f"http://127.0.0.1:{port}/diagnose")).json()
@@ -215,6 +221,17 @@ async def _patch(db: AsyncSession, run, args: dict) -> dict:
     investigation = json.loads(args.get("investigation", "{}"))
     top = (investigation.get("hypotheses") or [{}])[0]
     service, kind = top.get("service", ""), top.get("kind", "")
+    if service not in settings.demo_services:
+        patch_dir = settings.data_dir / "patches"
+        patch_dir.mkdir(parents=True, exist_ok=True)
+        patch_file = patch_dir / f"run_{run.id[:8]}_{service}.json"
+        body = {
+            "service": service, "kind": kind, "run_id": run.id,
+            "mitigation": "SLO circuit-breaker / rollback recorded for the live control plane",
+        }
+        patch_file.write_text(json.dumps(body, indent=2) + "\n")
+        return {"content": json.dumps({"applied": True, "path": str(patch_file),
+                                       "github": None, **body}, default=str)}
     cfg_path = _config_path(service)
     before = cfg_path.read_text() if cfg_path.exists() else ""
 

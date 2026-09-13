@@ -17,11 +17,12 @@ export default function Doc() {
 
       <h2 className="display" style={{ fontSize: 21, marginTop: 30 }}>How it works</h2>
       <p style={{ color: "var(--ink-70)", fontSize: 15 }}>
-        Your microphone streams 16 kHz audio over a WebSocket. Silero VAD (with an energy
-        floor) detects speech in real time; faster-whisper transcribes each utterance; the
-        brain answers through Sentinel with your Memory context; macOS <span className="mono">say</span>
-        (or Piper) speaks the reply sentence-by-sentence. Latency — STT, brain, total — is
-        measured per utterance and shown live against the 1.5 s target.
+        Your microphone (or the Web Speech API) streams to VAANI. On Cloud Run,
+        Vertex/Gemini transcribes and answers through Sentinel with your Memory
+        context; the browser speaks the reply when no WAV is returned. Piper /
+        faster-whisper / macOS <span className="mono">say</span> stay available on a laptop.
+        Phone trunk (Exotel/Sarvam) is optional. Latency — STT, brain, total — is
+        measured per utterance against the 1.5 s target.
       </p>
 
       <h2 className="display" style={{ fontSize: 21, marginTop: 30 }}>How to use it</h2>

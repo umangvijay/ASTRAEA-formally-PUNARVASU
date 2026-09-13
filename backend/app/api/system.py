@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,14 +18,23 @@ router = APIRouter(tags=["system"])
 
 
 @router.get("/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
+    ready = getattr(request.app.state, "ready", True)
+    boot_error = getattr(request.app.state, "boot_error", None)
+    status = "ok"
+    if boot_error:
+        status = "boot_failed"
+    elif not ready:
+        status = "starting"
     return {
-        "status": "ok",
+        "status": status,
         "app": settings.app_name.lower(),
         "version": settings.version,
         "mode": "postgres" if settings.db_url.startswith("postgresql") else "sqlite",
         "profile": settings.active_profile,
         "phase": settings.phase,
+        "vertex_configured": bool(settings.vertex_project),
+        "boot_error": boot_error,
     }
 
 

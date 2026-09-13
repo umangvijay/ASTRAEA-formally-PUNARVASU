@@ -39,28 +39,23 @@ python3 main.py
 # http://localhost:3000`}</div>
 
       <h2 className="display" style={{ fontSize: 21, marginTop: 30 }}>GCloud (Vertex + Cloud Run)</h2>
-      <div className="code-block">{`gcloud auth application-default login
-gcloud config set project YOUR_PROJECT
-gcloud services enable aiplatform.googleapis.com run.googleapis.com sqladmin.googleapis.com
+      <div className="code-block">{`# Full commands: docs/DEPLOY.md
+# Browser → console /api/astraea/* → API → Vertex. No canned replies.
 
-# local / GCE with ADC:
-# ASTRAEA_ENV=production
-# ASTRAEA_JWT_SECRET=<32+ chars>
-# ASTRAEA_VAULT_KEY=<32-byte hex>
-# ASTRAEA_VERTEX_PROJECT=YOUR_PROJECT
-# ASTRAEA_INGEST_TOKEN=<set>
-# ASTRAEA_CORS_ORIGINS=https://YOUR_CONSOLE.run.app
-# ASTRAEA_PUBLIC_API_URL=https://YOUR_API.run.app
-python3 main.py
+gcloud builds submit --config deploy/cloudbuild.api.yaml
+gcloud run deploy astraea-api --image gcr.io/YOUR_PROJECT/astraea-api \\
+  --allow-unauthenticated --memory 1Gi --region us-central1 \\
+  --set-env-vars ASTRAEA_ENV=production,ASTRAEA_VERTEX_PROJECT=YOUR_PROJECT,ASTRAEA_JWT_SECRET=…,ASTRAEA_INGEST_TOKEN=…
 
-# API image:
-# docker build -t astraea-api -f deploy/Dockerfile.api .
-# gcloud run deploy astraea-api --image … --allow-unauthenticated \\
-#   --set-env-vars ASTRAEA_ENV=production,ASTRAEA_VERTEX_PROJECT=YOUR_PROJECT`}</div>
+gcloud builds submit --config deploy/cloudbuild.console.yaml
+gcloud run deploy astraea-console --image gcr.io/YOUR_PROJECT/astraea-console \\
+  --allow-unauthenticated --region us-central1 \\
+  --set-env-vars ASTRAEA_USE_API_PROXY=1,ASTRAEA_PUBLIC_API_URL=https://astraea-api-….run.app`}</div>
       <p style={{ color: "var(--ink-70)", fontSize: 15 }}>
         Cloud Run attaches ADC automatically — no access token in env if the
-        service account can call Vertex. Set <span className="mono">ASTRAEA_CORS_ORIGINS</span>
-        to the console origin. AWS later is the same binary plus env: point
+        service account can call Vertex (<span className="mono">roles/aiplatform.user</span>).
+        The console proxies the API so guest login is not a cross-origin
+        <span className="mono">Failed to fetch</span>. AWS later is the same binary plus env: point
         <span className="mono">ASTRAEA_DATABASE_URL</span> at RDS. No rewrite.
       </p>
     </>

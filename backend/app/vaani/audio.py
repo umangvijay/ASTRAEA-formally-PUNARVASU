@@ -113,7 +113,7 @@ class Transcriber:
         return self._model
 
     def transcribe(self, pcm16: bytes) -> str:
-        # Sarvam Saaras (Indic) when explicitly enabled; whisper otherwise / on failure.
+        # Sarvam Saaras (Indic) when explicitly enabled; Vertex/Gemini next; whisper last.
         from app.vaani import sarvam
 
         if sarvam.stt_enabled():
@@ -121,17 +121,79 @@ class Transcriber:
                 import asyncio
 
                 return asyncio.run(sarvam.transcribe(pcm16))
-            except Exception:  # noqa: BLE001 — degrade to local whisper
+            except Exception:  # noqa: BLE001 — degrade to cloud / whisper
                 pass
-        import numpy as np
+        cloud = _transcribe_gemini(pcm16)
+        if cloud:
+            return cloud
+        try:
+            import numpy as np
 
-        arr = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
-        model = self._ensure_model()
-        segments, _ = model.transcribe(arr, language="en", beam_size=1, vad_filter=False)
-        return " ".join(s.text.strip() for s in segments).strip()
+            arr = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
+            model = self._ensure_model()
+            segments, _ = model.transcribe(arr, language="en", beam_size=1, vad_filter=False)
+            return " ".join(s.text.strip() for s in segments).strip()
+        except Exception:
+            return ""
 
 
 _transcriber: Transcriber | None = None
+
+
+def _transcribe_gemini(pcm16: bytes) -> str:
+    """Vertex / Gemini speech-to-text — the Cloud Run path (no whisper/torch)."""
+    if not pcm16 or len(pcm16) < 3200:
+        return ""
+    try:
+        import base64
+
+        import httpx
+
+        from app.sentinel.upstream import pick_provider
+
+        provider, model = pick_provider(None)
+        if provider not in ("gemini", "vertex"):
+            return ""
+        wav = _wav_bytes(pcm16, SAMPLE_RATE)
+        body = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": "Transcribe this spoken audio. Return only the words, no quotes."},
+                    {"inlineData": {"mimeType": "audio/wav",
+                                    "data": base64.b64encode(wav).decode()}},
+                ],
+            }],
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 256},
+        }
+        loc, proj = settings.vertex_location, settings.vertex_project
+        if provider == "vertex":
+            from app.sentinel.upstream import _vertex_adc_token
+
+            url = (
+                f"https://{loc}-aiplatform.googleapis.com/v1/projects/{proj}/locations/{loc}"
+                f"/publishers/google/models/{model.removeprefix('vertex/')}:generateContent"
+            )
+            token = settings.vertex_access_token or _vertex_adc_token()
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            key = settings.vertex_api_key or (settings.gemini_api_key if not token else "")
+            if key and not token:
+                url += f"?key={key}"
+        else:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={settings.gemini_api_key}"
+            )
+            headers = {}
+        with httpx.Client(timeout=45) as client:
+            resp = client.post(url, json=body, headers=headers)
+            if resp.status_code != 200:
+                return ""
+            parts = (((resp.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+            text = " ".join(p.get("text", "") for p in parts).strip()
+            return text
+    except Exception:
+        return ""
 
 
 def get_transcriber() -> Transcriber:
@@ -164,7 +226,10 @@ async def synthesize(text: str) -> bytes:
     try:
         return await _synthesize_piper(text)
     except Exception:  # noqa: BLE001 — piper not installed/voiced: say fallback
-        return await _synthesize_say(text)
+        try:
+            return await _synthesize_say(text)
+        except Exception:
+            return b""
 
 
 async def _synthesize_piper(text: str) -> bytes:

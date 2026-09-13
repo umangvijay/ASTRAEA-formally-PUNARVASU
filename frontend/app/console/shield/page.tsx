@@ -74,8 +74,9 @@ export default function ShieldPage() {
         </div>
         <h1 className="display">SHIELD.</h1>
         <p>
-          Synthetic lab playbooks mapped to MITRE ATT&amp;CK — not Wazuh, Suricata,
-          or Atomic Red Team on VMs. Neo4j only if <span className="mono">ASTRAEA_NEO4J_URL</span> is set.
+          Live auth, guest sessions and SENTINEL blocks land in the event store
+          and map to MITRE ATT&amp;CK. Optional red-team playbooks still exist
+          under Lab attack. Neo4j only if <span className="mono">ASTRAEA_NEO4J_URL</span> is set.
         </p>
       </div>
 
@@ -143,8 +144,8 @@ export default function ShieldPage() {
       <section>
         <p className="label label--ink" style={{ marginBottom: 12 }}>INCIDENT WAR ROOM — newest first</p>
         {incidents.length === 0 && (
-          <div className="empty">all clear. fire a lab attack above — incidents appear here in
-            real time with their ATT&amp;CK mapping and attack graph.</div>
+          <div className="empty">all clear. live logins and SENTINEL blocks land in the
+            event store; fire a lab attack to force a full ATT&amp;CK playbook into the war room.</div>
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 26 }}>
           {incidents.map((inc) => (

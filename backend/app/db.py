@@ -26,6 +26,7 @@ def _engine():
     if parsed.drivername.startswith("postgresql"):
         kwargs["pool_size"] = 10
         kwargs["max_overflow"] = 20
+        kwargs["connect_args"] = {"connect_timeout": 8}
     return create_async_engine(settings.db_url, **kwargs)
 
 

@@ -1098,12 +1098,17 @@ input:focus, textarea:focus { outline: none; }
 .tabs button.on { background: var(--ink); color: var(--paper); }
 
 .manifesto { font-size: 40px; max-width: 560px; }
-.manifesto em {
+.manifesto em,
+.hero p.lead em {
   font-style: normal;
+  font-weight: 600;
   color: #faf7f2;
   background: color-mix(in srgb, var(--accent) 72%, #6b2414);
   box-shadow: none;
-  padding: 0 0.18em;
+  padding: 0.02em 0.22em;
+  white-space: nowrap;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 
@@ -1294,6 +1299,16 @@ input:focus, textarea:focus { outline: none; }
 .hero p.lead {
   font-size: 17px; color: var(--ink-70); max-width: 620px;
   position: relative; z-index: 1;
+}
+.hero p.lead em {
+  font-style: normal;
+  font-weight: 600;
+  color: #faf7f2;
+  background: color-mix(in srgb, var(--accent) 72%, #6b2414);
+  padding: 0.02em 0.22em;
+  white-space: nowrap;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .section {
@@ -1659,7 +1674,11 @@ html[data-theme="dark"] .public-nav nav a:hover { color: var(--accent); }
 html[data-theme="dark"] .hero { color: var(--ink); }
 html[data-theme="dark"] .hero .lead { color: var(--ink-70); }
 html[data-theme="dark"] .manifesto { color: var(--ink); }
-html[data-theme="dark"] .manifesto em { background: rgba(255, 122, 69, 0.2); }
+html[data-theme="dark"] .hero .lead em,
+html[data-theme="dark"] .manifesto em {
+  color: #faf7f2;
+  background: color-mix(in srgb, var(--accent) 72%, #6b2414);
+}
 html[data-theme="dark"] .section { color: var(--ink); }
 html[data-theme="dark"] .section p { color: var(--ink-70); }
 html[data-theme="dark"] .docs-shell {
@@ -2228,10 +2247,14 @@ html[data-theme="dark"] .login-card .field input:focus {
 }
 .manifesto em {
   font-style: normal;
+  font-weight: 600;
   color: #faf7f2;
   background: color-mix(in srgb, var(--accent) 72%, #6b2414);
   box-shadow: none;
-  padding: 0 0.18em;
+  padding: 0.02em 0.22em;
+  white-space: nowrap;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 html[data-theme="dark"] .hero { background-image: none; }
 html[data-theme="dark"] .manifesto em {

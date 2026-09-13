@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, getToken, resolveApiBase } from "@/lib/api";
+import { api, getToken, resolveWsBase } from "@/lib/api";
 
 type Turn = { role: string; text: string };
 type Booking = { id: number; customer_name: string; service: string; scheduled_for: string };
@@ -79,10 +79,41 @@ export default function VaaniPage() {
 
   function connect() {
     (async () => {
-      const base = await resolveApiBase();
-      const ws = new WebSocket(`${base.replace("http", "ws")}/ws/vaani?token=${getToken()}`);
+      const base = await resolveWsBase();
+      const ws = new WebSocket(`${base}/ws/vaani?token=${getToken()}`);
     wsRef.current = ws;
-    ws.onopen = () => { setConnected(true); setNote("listening…"); startMic(ws); };
+    ws.onopen = () => {
+      setConnected(true);
+      setNote("listening…");
+      startMic(ws);
+      const w = window as unknown as {
+        SpeechRecognition?: new () => {
+          continuous: boolean; interimResults: boolean; lang: string;
+          onresult: ((e: { results: { length: number; [i: number]: { 0: { transcript: string } } } }) => void) | null;
+          onend: (() => void) | null;
+          start: () => void; stop: () => void;
+        };
+        webkitSpeechRecognition?: new () => {
+          continuous: boolean; interimResults: boolean; lang: string;
+          onresult: ((e: { results: { length: number; [i: number]: { 0: { transcript: string } } } }) => void) | null;
+          onend: (() => void) | null;
+          start: () => void; stop: () => void;
+        };
+      };
+      const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+      if (Ctor) {
+        const rec = new Ctor();
+        rec.continuous = true;
+        rec.interimResults = false;
+        rec.lang = "en-US";
+        rec.onresult = (e) => {
+          const text = e.results[e.results.length - 1][0].transcript.trim();
+          if (text && ws.readyState === 1) ws.send(JSON.stringify({ type: "utterance", text }));
+        };
+        rec.onend = () => { if (ws.readyState === 1) try { rec.start(); } catch { /* already started */ } };
+        try { rec.start(); } catch { /* unsupported */ }
+      }
+    };
     ws.onmessage = (m) => {
       const d = JSON.parse(m.data);
       if (d.type === "stt_final" && d.text) {
@@ -90,6 +121,13 @@ export default function VaaniPage() {
         setLat((l) => ({ ...l, stt_ms: d.latency_ms }));
       } else if (d.type === "reply_sentence") {
         setTurns((t) => [...t, { role: "vaani", text: d.text }]);
+        if (d.speak === "browser" && typeof window !== "undefined" && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(d.text);
+          playingRef.current = true;
+          u.onend = () => { playingRef.current = false; };
+          window.speechSynthesis.speak(u);
+        }
       } else if (d.type === "tts_audio") {
         playingRef.current = true;
         const audio = audioElRef.current;
@@ -117,6 +155,7 @@ export default function VaaniPage() {
     wsRef.current?.close();
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
   }
 
   const totalLat = lat?.total_ms ?? 0;
@@ -132,9 +171,9 @@ export default function VaaniPage() {
         </div>
         <h1 className="display">VAANI.</h1>
         <p>
-          Browser WebSocket + ScriptProcessor (deprecated API). Exotel/PSTN only
-          if <span className="mono">ASTRAEA_VAANI_TELEPHONY</span> is set. Not a
-          Mumbai load-test board.
+          Browser speech (Web Speech API) plus Vertex/Gemini for the brain.
+          Phone trunk (Exotel) is optional when{" "}
+          <span className="mono">ASTRAEA_VAANI_TELEPHONY</span> is set.
         </p>
       </div>
 

@@ -26,14 +26,13 @@ import logging
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlalchemy import event
 
 from app.config import settings
 from app.vaani import privacy
-from app.vaani.audio import SAMPLE_RATE, get_transcriber, get_vad, synthesize
-from app.vaani.brain import book, respond, sentences
 from app.vaani.models import VaaniTranscript
 from app.vaani.telephony import START, STOP, TelephonyAdapter, get_adapter
+
+SAMPLE_RATE = 16000
 
 router = APIRouter(tags=["vaani"])
 
@@ -131,6 +130,8 @@ async def _serve(websocket: WebSocket, tenant_id: str, adapter: TelephonyAdapter
     turns our outbound frames into the carrier's (dropping frames it doesn't carry, e.g.
     transcripts on a telephony leg)."""
     from app.db import SessionLocal
+    from app.vaani.audio import get_transcriber, get_vad, synthesize
+    from app.vaani.brain import respond, sentences
 
     async def send(obj: dict) -> None:
         out = adapter.encode(obj)
@@ -161,9 +162,77 @@ async def _serve(websocket: WebSocket, tenant_id: str, adapter: TelephonyAdapter
         wav = await synthesize(sent)
         if cancelled:
             return
-        await send({"type": "reply_sentence", "text": sent, "no": no})
-        await send({"type": "tts_audio", "no": no, "data": base64.b64encode(wav).decode()})
+        await send({"type": "reply_sentence", "text": sent, "no": no,
+                    "speak": "browser" if not wav else "server"})
+        if wav:
+            await send({"type": "tts_audio", "no": no, "data": base64.b64encode(wav).decode()})
         session.latencies.append({"tts_ms": round((time.perf_counter() - t) * 1000, 1)})
+
+    async def _turn(text: str, t0: float, stt_ms: float) -> None:
+        nonlocal cancelled
+        await send({"type": "stt_final", "text": text, "latency_ms": stt_ms})
+        if not text:
+            return
+        session.turns.append({"role": "caller", "text": text})
+        tb = time.perf_counter()
+        try:
+            async with SessionLocal() as db:
+                turn = await respond(db, tenant_id, session.history, text)
+        except Exception as exc:  # noqa: BLE001 — degrade with a spoken apology
+            logger.warning("vaani brain failed: %s", exc)
+            await send({"type": "error", "detail": f"brain unavailable ({str(exc)[:120]})"})
+            await send({"type": "reply_sentence", "text": _DEGRADED_REPLY, "no": 0, "speak": "browser"})
+            cancelled = False
+            return
+        brain_ms = round((time.perf_counter() - tb) * 1000, 1)
+        reply = turn["reply"]
+        session.history.append({"role": "caller", "text": text})
+        session.history.append({"role": "assistant", "text": reply})
+        session.turns.append({"role": "assistant", "text": reply})
+        cancelled = False
+        total_ms = round((time.perf_counter() - t0) * 1000, 1)
+        await send({"type": "metrics", "stt_ms": stt_ms,
+                    "brain_ms": brain_ms, "total_ms": total_ms,
+                    "target_ms": settings.vaani_latency_target_ms})
+        LATENCIES.setdefault(tenant_id, []).append(
+            {"stt_ms": stt_ms, "brain_ms": brain_ms, "total_ms": total_ms})
+        LATENCIES[tenant_id] = LATENCIES[tenant_id][-200:]
+
+        booking = turn.get("booking")
+        if booking:
+            from app.core import engine
+            from app.core.models import Run
+
+            steps = engine.validate_workflow([
+                {"name": "book", "type": "tool", "tool": "vaani.book",
+                 "args": {"booking_json": json.dumps(booking, default=str)}},
+            ])
+            run = Run(tenant_id=tenant_id,
+                      goal=f"Voice booking: {booking.get('customer_name')} — {booking.get('service')}",
+                      workflow=steps, origin_module="vaani")
+            async with SessionLocal() as db:
+                db.add(run)
+                await db.commit()
+                await db.refresh(run)
+                run_id = run.id
+            await engine.execute(run_id)
+            async with SessionLocal() as db:
+                r2 = await db.get(Run, run_id)
+                payload = json.loads(((r2.result or {}).get("outputs", {}) or {}).get("book", "{}") or "{}")
+            if payload:
+                await send({"type": "action", "tool": "vaani.book",
+                            "result": {**payload, "run_id": run_id}})
+                session.turns.append({"role": "action",
+                                      "text": json.dumps(payload, default=str)})
+
+        for no, sent in enumerate(sentences(reply)):
+            if cancelled:
+                break
+            session.tts_task = asyncio.get_running_loop().create_task(send_reply(sent, no))
+            try:
+                await session.tts_task
+            except asyncio.CancelledError:
+                break
 
     try:
         while True:
@@ -192,6 +261,11 @@ async def _serve(websocket: WebSocket, tenant_id: str, adapter: TelephonyAdapter
                 await send({"type": "tts_cancelled", "latency_ms": cancel_ms})
                 continue
 
+            if data.get("type") == "utterance":
+                text = str(data.get("text") or "").strip()
+                if text:
+                    await _turn(text, t0=time.perf_counter(), stt_ms=0.0)
+                continue
             if data.get("type") != "audio":
                 continue
             pcm = base64.b64decode(data.get("data", ""))
@@ -210,71 +284,7 @@ async def _serve(websocket: WebSocket, tenant_id: str, adapter: TelephonyAdapter
                 await send({"type": "error", "detail": "transcription failed — try again"})
                 continue
             stt_ms = round((time.perf_counter() - t0) * 1000, 1)
-            await send({"type": "stt_final", "text": text, "latency_ms": stt_ms})
-            if not text:
-                continue
-            session.turns.append({"role": "caller", "text": text})
-
-            tb = time.perf_counter()
-            try:
-                async with SessionLocal() as db:
-                    turn = await respond(db, tenant_id, session.history, text)
-            except Exception as exc:  # noqa: BLE001 — degrade with a spoken apology, never a dead socket
-                logger.warning("vaani brain failed: %s", exc)
-                await send({"type": "error", "detail": f"brain unavailable ({str(exc)[:120]})"})
-                await send({"type": "reply_sentence", "text": _DEGRADED_REPLY, "no": 0})
-                cancelled = False
-                continue
-            brain_ms = round((time.perf_counter() - tb) * 1000, 1)
-            reply = turn["reply"]
-            session.history.append({"role": "caller", "text": text})
-            session.history.append({"role": "assistant", "text": reply})
-            session.turns.append({"role": "assistant", "text": reply})
-
-            cancelled = False
-            total_ms = round((time.perf_counter() - t0) * 1000, 1)
-            await send({"type": "metrics", "stt_ms": stt_ms,
-                        "brain_ms": brain_ms, "total_ms": total_ms,
-                        "target_ms": settings.vaani_latency_target_ms})
-            LATENCIES.setdefault(tenant_id, []).append(
-                {"stt_ms": stt_ms, "brain_ms": brain_ms, "total_ms": total_ms})
-            LATENCIES[tenant_id] = LATENCIES[tenant_id][-200:]
-
-            booking = turn.get("booking")
-            if booking:
-                from app.core import engine
-                from app.core.models import Run
-
-                steps = engine.validate_workflow([
-                    {"name": "book", "type": "tool", "tool": "vaani.book",
-                     "args": {"booking_json": json.dumps(booking, default=str)}},
-                ])
-                run = Run(tenant_id=tenant_id,
-                          goal=f"Voice booking: {booking.get('customer_name')} — {booking.get('service')}",
-                          workflow=steps, origin_module="vaani")
-                async with SessionLocal() as db:
-                    db.add(run)
-                    await db.commit()
-                    await db.refresh(run)
-                    run_id = run.id
-                await engine.execute(run_id)  # durable + replayable; auto-approved by policy
-                async with SessionLocal() as db:
-                    r2 = await db.get(Run, run_id)
-                    payload = json.loads(((r2.result or {}).get("outputs", {}) or {}).get("book", "{}") or "{}")
-                if payload:
-                    await send({"type": "action", "tool": "vaani.book",
-                                "result": {**payload, "run_id": run_id}})
-                    session.turns.append({"role": "action",
-                                          "text": json.dumps(payload, default=str)})
-
-            for no, sent in enumerate(sentences(reply)):
-                if cancelled:
-                    break
-                session.tts_task = asyncio.get_running_loop().create_task(send_reply(sent, no))
-                try:
-                    await session.tts_task
-                except asyncio.CancelledError:
-                    break
+            await _turn(text, t0, stt_ms)
     except WebSocketDisconnect:
         pass
     finally:

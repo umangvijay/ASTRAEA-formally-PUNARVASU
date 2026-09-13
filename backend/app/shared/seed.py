@@ -172,7 +172,7 @@ SHIELD_RULES = [
      "technique_id": "T1071.001", "severity": "critical"},
     {"name": "suspicious-process-execution", "description": "Script interpreter downloading or running payloads from temp",
      "event_types": ["process_exec"],
-     "threshold": {"evaluator": "process_pattern", "patterns": ["base64 -d", "/tmp/", "curl http://"]},
+     "threshold": {"evaluator": "process_pattern", "patterns": ["base64 -d", "/tmp/", "curl http://", "sentinel.block"]},
      "technique_id": "T1059", "severity": "high"},
 ]
 
@@ -186,4 +186,16 @@ async def seed_shield(db) -> None:
     if (await db.execute(select(func.count()).select_from(ShieldRule))).scalar_one() == 0:
         for rule in SHIELD_RULES:
             db.add(ShieldRule(tenant_id=None, **rule))
+    else:
+        # existing DBs: keep SENTINEL blocks on the live process-exec rule
+        rows = (await db.execute(
+            select(ShieldRule).where(ShieldRule.name == "suspicious-process-execution")
+        )).scalars().all()
+        for rule in rows:
+            th = dict(rule.threshold or {})
+            pats = list(th.get("patterns") or [])
+            if "sentinel.block" not in pats:
+                pats.append("sentinel.block")
+                th["patterns"] = pats
+                rule.threshold = th
     await db.commit()

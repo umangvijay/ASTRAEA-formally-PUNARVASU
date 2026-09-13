@@ -11,18 +11,36 @@ export function setApiBase(base: string): void {
 export async function resolveApiBase(): Promise<string> {
   if (_resolvedBase) return _resolvedBase;
   const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   try {
     const r = await fetch("/api/runtime-config", { cache: "no-store" });
     const cfg = await r.json();
-    if (typeof cfg.api_public_url === "string" && cfg.api_public_url) {
+    const cloudHost = host.endsWith(".run.app") || host.endsWith(".web.app");
+    if (cfg.use_proxy || cloudHost) {
+      _resolvedBase = `${origin}/api/astraea`;
+    } else if (typeof cfg.api_public_url === "string" && cfg.api_public_url) {
       _resolvedBase = String(cfg.api_public_url).replace(/\/$/, "");
     } else {
       _resolvedBase = `http://${host}:${cfg.api_port ?? 8000}`;
     }
   } catch {
-    _resolvedBase = `http://${host}:8000`;
+    _resolvedBase = host.endsWith(".run.app") ? `${origin}/api/astraea` : `http://${host}:8000`;
   }
   return _resolvedBase;
+}
+
+/** VAANI WebSocket origin — the real API host, never the HTTP proxy prefix. */
+export async function resolveWsBase(): Promise<string> {
+  try {
+    const r = await fetch("/api/runtime-config", { cache: "no-store" });
+    const cfg = await r.json();
+    const raw = String(cfg.api_ws_url || cfg.api_public_url || "").replace(/\/$/, "");
+    if (raw) return raw.replace(/^http/, "ws");
+  } catch {
+    /* fall through */
+  }
+  const http = await resolveApiBase();
+  return http.replace(/^http/, "ws");
 }
 
 export const API_BASE = "http://localhost:8000"; // fallback; real base resolved per call
@@ -200,6 +218,72 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(resp.status, fromError || detailToMessage(b.detail, resp.statusText));
   }
   return body as T;
+}
+
+/** POST /v1/chat/completions with stream:true — tokens appear as the model writes them. */
+export async function streamChat(
+  messages: { role: string; content: string }[],
+  onDelta: (text: string) => void,
+): Promise<{ provider?: string; model?: string }> {
+  const base = await resolveApiBase();
+  const resp = await fetch(`${base}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken() ?? ""}`,
+    },
+    body: JSON.stringify({ messages, stream: true }),
+  });
+  if (resp.status === 401 && typeof window !== "undefined") {
+    clearToken();
+    window.location.href = "/login";
+    throw new ApiError(401, "session expired");
+  }
+  const ct = resp.headers.get("content-type") || "";
+  if (!resp.ok || !resp.body || !ct.includes("text/event-stream")) {
+    const body = await resp.json().catch(() => ({}));
+    const b = body as { detail?: unknown; error?: { message?: string } };
+    const fromError = typeof b.error?.message === "string" ? b.error.message : "";
+    throw new ApiError(resp.status, fromError || detailToMessage(b.detail, resp.statusText || "chat failed"));
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let model: string | undefined;
+  let provider: string | undefined;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") return { provider, model };
+        try {
+          const payload = JSON.parse(data) as {
+            model?: string;
+            error?: { message?: string; type?: string };
+            astraea?: { provider?: string };
+            choices?: { delta?: { content?: string } }[];
+          };
+          if (payload.error?.message) {
+            throw new ApiError(503, payload.error.message);
+          }
+          if (payload.model) model = payload.model;
+          if (payload.astraea?.provider) provider = payload.astraea.provider;
+          const piece = payload.choices?.[0]?.delta?.content;
+          if (piece) onDelta(piece);
+        } catch (err) {
+          if (err instanceof ApiError) throw err;
+        }
+      }
+    }
+  }
+  return { provider, model };
 }
 
 // ── realtime SSE (fetch-based so the Authorization header works) ─────────

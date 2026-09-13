@@ -92,6 +92,17 @@ async def chat_completions(body: ChatIn, request: Request,
     if scan.action == "block":
         await meter(db, tenant.id, blocked=True)
         await publish(f"sentinel:{tenant.id}", {"kind": "blocked", "hits": scan.hits})
+        try:
+            from app.shield import live as shield_live
+
+            ip = request.client.host if request.client else None
+            rules = ",".join(h.get("rule_name", "") for h in (scan.hits or []) if isinstance(h, dict))
+            await shield_live.record(
+                tenant.id, event="process_exec", src_ip=ip,
+                process=f"sentinel.block:{rules}"[:200],
+            )
+        except Exception:
+            pass
         return JSONResponse(
             status_code=400,
             content={
@@ -193,6 +204,7 @@ async def _stream_response(db: AsyncSession, tenant_id: str, provider: str, mode
             "object": "chat.completion.chunk",
             "model": model,
             "choices": [{"index": 0, "finish_reason": finish_reason, "delta": delta}],
+            "astraea": {"provider": provider},
         })
 
     yield chunk({"role": "assistant", "content": ""})

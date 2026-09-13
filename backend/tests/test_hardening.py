@@ -138,3 +138,40 @@ def test_vector_embedder_dim_matches_minilm():
     assert HashedEmbedder.dim == _EMBED_DIM == 384
     vec = HashedEmbedder().encode(["hello world of astraea"])[0]
     assert len(vec) == 384
+
+
+def test_cors_regex_matches_regional_cloud_run():
+    import re
+
+    rx = re.compile(settings.cors_origin_regex)
+    assert rx.fullmatch("https://astraea-console-714727365323.us-central1.run.app")
+    assert rx.fullmatch("http://127.0.0.1:3000")
+    assert rx.fullmatch("https://astraea-api-714727365323.us-central1.run.app")
+    assert not rx.fullmatch("https://evil.example.com")
+
+
+def test_sse_format_json_encodes_dicts():
+    import json as _json
+
+    from app.shared.bus import sse_format
+
+    frame = sse_format({"choices": [{"delta": {"content": "hi"}}]})
+    assert frame.startswith("data: {")
+    payload = _json.loads(frame.removeprefix("data: ").strip())
+    assert payload["choices"][0]["delta"]["content"] == "hi"
+
+
+def test_cloud_run_missing_secrets_boot(monkeypatch):
+    from app import config
+
+    prev = (config.settings.jwt_secret, config.settings.ingest_token, config.settings.env)
+    monkeypatch.setenv("K_SERVICE", "astraea-api")
+    try:
+        config.settings.env = "production"
+        config.settings.jwt_secret = ""
+        config.settings.ingest_token = ""
+        config.apply_production_guards()
+        assert config.settings.jwt_secret.startswith("cloud-")
+        assert config.settings.ingest_token.startswith("cloud-ingest-")
+    finally:
+        config.settings.jwt_secret, config.settings.ingest_token, config.settings.env = prev

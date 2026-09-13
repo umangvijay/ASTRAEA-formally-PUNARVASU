@@ -36,12 +36,16 @@ def _get_client():
     if _client is None:
         with _client_lock:
             if _client is None:
-                import chromadb
+                try:
+                    import chromadb
 
-                path = str(settings.data_dir / "chroma")
-                settings.data_dir.mkdir(parents=True, exist_ok=True)
-                _client = chromadb.PersistentClient(path=path)
-    return _client
+                    path = str(settings.data_dir / "chroma")
+                    settings.data_dir.mkdir(parents=True, exist_ok=True)
+                    _client = chromadb.PersistentClient(path=path)
+                except Exception as exc:  # noqa: BLE001 — chroma is optional on Cloud Run
+                    logger.warning("chroma unavailable (%s) — vector memory disabled", str(exc)[:80])
+                    _client = False
+    return _client if _client is not False else None
 
 
 # ── embeddings ─────────────────────────────────────────────────────
@@ -83,13 +87,25 @@ def get_embedder():
     """MiniLM (neural, spec-recommended) when loadable; hashed fallback otherwise."""
     global _embedder, _embedder_kind
     if _embedder is None:
-        try:
-            from sentence_transformers import SentenceTransformer
+        import os
 
-            _embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-            _embedder_kind = "minilm"
-        except Exception as exc:  # noqa: BLE001 — offline / weights missing
-            logger.warning("MiniLM unavailable (%s) — using hashed embeddings", str(exc)[:80])
+        # Cloud Run OOM-kills a 512Mi instance that loads torch/MiniLM at boot.
+        force_hash = (
+            os.environ.get("K_SERVICE")
+            or os.environ.get("ASTRAEA_EMBEDDER", "").lower() == "hash"
+            or settings.env == "production"
+        )
+        if not force_hash:
+            try:
+                from sentence_transformers import SentenceTransformer
+
+                _embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+                _embedder_kind = "minilm"
+            except Exception as exc:  # noqa: BLE001 — offline / weights missing
+                logger.warning("MiniLM unavailable (%s) — using hashed embeddings", str(exc)[:80])
+                _embedder = HashedEmbedder()
+                _embedder_kind = "hash"
+        if _embedder is None:
             _embedder = HashedEmbedder()
             _embedder_kind = "hash"
     return _embedder
@@ -111,8 +127,11 @@ def _embed(texts: list[str]) -> list[list[float]]:
 def _collection():
     # Namespace by embedder kind so a MiniLM<->hash failover (different processes,
     # missing weights) can never write mismatched dims into one collection (bug #13).
+    client = _get_client()
+    if client is None:
+        raise RuntimeError("chroma unavailable")
     name = f"{_COLLECTION}_{embed_kind()}"
-    return _get_client().get_or_create_collection(
+    return client.get_or_create_collection(
         name, metadata={"hnsw:space": "cosine"}
     )
 

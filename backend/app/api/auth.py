@@ -139,6 +139,12 @@ async def login(request: Request, payload: LoginIn, db: AsyncSession = Depends(g
     if user is None or not verify_password(payload.password, user.password_hash):
         _record_failure(email, ip)
         await audit(db, action="login.failed", detail=email, ip=ip)
+        if user is not None:
+            from app.shield import live as shield_live
+            await shield_live.record(
+                user.tenant_id, event="login_failure", user=email, src_ip=ip,
+                process="auth.login",
+            )
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     # transparent upgrade: legacy scrypt hash → Argon2id
@@ -151,6 +157,11 @@ async def login(request: Request, payload: LoginIn, db: AsyncSession = Depends(g
     tenant = await db.get(Tenant, user.tenant_id)
     await audit(db, tenant_id=user.tenant_id, user_id=user.id,
                 action="login.success", detail=email, ip=ip)
+    from app.shield import live as shield_live
+    await shield_live.record(
+        user.tenant_id, event="login_success", user=email, src_ip=ip,
+        process="auth.login",
+    )
 
     return {
         "access_token": create_access_token(user.id, user.tenant_id, user.role),
@@ -171,7 +182,7 @@ import datetime as _dt
 
 
 @router.post("/guest", status_code=201)
-async def guest_session(db: AsyncSession = Depends(get_db)) -> dict:
+async def guest_session(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """A time-boxed guest workspace: full platform for 30 minutes, then the token dies."""
     import uuid as _uuid
 
@@ -193,6 +204,12 @@ async def guest_session(db: AsyncSession = Depends(get_db)) -> dict:
     await db.commit()
     await db.refresh(tenant)
 
+    ip = request.client.host if request.client else "unknown"
+    from app.shield import live as shield_live
+    await shield_live.record(
+        tenant.id, event="login_success", user=user.email, src_ip=ip,
+        process="auth.guest",
+    )
     now2 = _dt.datetime.now(_dt.timezone.utc)
     import jwt as _jwt
     from app.config import settings as _s

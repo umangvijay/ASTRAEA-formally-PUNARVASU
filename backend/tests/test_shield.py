@@ -75,6 +75,18 @@ def test_rule_evaluator_unit():
     assert evaluate_rules(events_short, rules) == []  # below threshold → no hit
 
 
+def test_sentinel_block_maps_to_execution():
+    rules = [{"name": "suspicious-process-execution", "event_types": ["process_exec"],
+              "threshold": {"evaluator": "process_pattern",
+                            "patterns": ["base64 -d", "/tmp/", "curl http://", "sentinel.block"]},
+              "technique_id": "T1059", "severity": "high", "enabled": True}]
+    events = [{"host": "astraea-api", "event": "process_exec",
+               "process": "sentinel.block:prompt-injection", "src_ip": "9.9.9.9", "ts": 1}]
+    hits = evaluate_rules(events, rules)
+    assert len(hits) == 1
+    assert hits[0]["technique_id"] == "T1059"
+
+
 EXPECTED = {
     "brute_force": {"T1110", "T1078"},
     "lateral_movement": {"T1046"},

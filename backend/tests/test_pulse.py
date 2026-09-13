@@ -28,6 +28,15 @@ async def _ingest(client, auth_headers, service, metrics):
     assert resp.status_code == 200
 
 
+def test_live_platform_snapshot_has_sre_columns():
+    from app.pulse.live import snapshot
+    from app.pulse.store import METRIC_COLUMNS
+
+    m = snapshot()
+    assert set(METRIC_COLUMNS) <= set(m)
+    assert m["p95_latency"] >= 0
+
+
 async def test_ingest_and_series(client, auth_headers):
     m = {**NORMAL, "request_rate": 10.0 + random.uniform(-1, 1)}
     await _ingest(client, auth_headers, "checkout", m)
@@ -36,7 +45,7 @@ async def test_ingest_and_series(client, auth_headers):
     assert abs(series["points"][0]["error_rate"] - m["error_rate"]) < 0.01
 
 
-async def test_chaos_without_demo_services_is_graceful_503(client, auth_headers, monkeypatch):
+async def test_chaos_falls_back_to_live_platform(client, auth_headers, monkeypatch):
     import httpx as _hx
 
     from app.demo import services as _demo
@@ -46,7 +55,11 @@ async def test_chaos_without_demo_services_is_graceful_503(client, auth_headers,
 
     monkeypatch.setattr(_demo, "_call_service", _unreachable)
     resp = await client.post("/api/pulse/chaos", headers=auth_headers, json={})
-    assert resp.status_code == 503
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["service"] == "astraea-api"
+    assert body["fault"]
+    assert body["auto_recover_s"] >= 1
 
 
 async def test_detector_flags_drift_and_stops_the_mttd_clock(client, auth_headers, app, monkeypatch):

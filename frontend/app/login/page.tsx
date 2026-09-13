@@ -27,7 +27,8 @@ export default function LoginPage() {
       setToken(body.access_token);
       router.replace("/console");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed");
+      const msg = err instanceof Error ? err.message : "failed";
+      setError(msg === "Failed to fetch" ? "API unreachable — the control plane did not respond." : msg);
     } finally {
       setBusy(false);
     }
@@ -48,7 +49,8 @@ export default function LoginPage() {
       setToken(body.access_token);
       router.replace("/console");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "something went wrong");
+      const msg = err instanceof Error ? err.message : "something went wrong";
+      setError(msg === "Failed to fetch" ? "API unreachable — the control plane did not respond." : msg);
     } finally {
       setBusy(false);
     }
@@ -66,7 +68,7 @@ export default function LoginPage() {
 
       <section className="login-left">
         <h1 className="display manifesto">
-          Agents that do the <em>work of</em> humans — watched, approved
+          Agents that do the <em>work of humans</em> — watched, approved
           and remembered.
         </h1>
       </section>
@@ -135,7 +137,7 @@ export default function LoginPage() {
       </section>
 
       <p className="label login-meta">
-        v0.3.0 · full platform — data stays on this machine
+        v0.3.0 · control plane — your workspace, your data
         <br />
         medic · operator · shield · vaani · forge · model-forge
       </p>

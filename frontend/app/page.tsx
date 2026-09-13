@@ -43,7 +43,7 @@ export default function Landing() {
             Astraea.
           </h1>
           <p className="lead">
-            Six agents that do the work of humans — watched, approved and remembered.
+            Six agents that do the <em>work of humans</em> — watched, approved and remembered.
             One shared brain. Offline on your machine. The same build on Vertex AI
             and any cloud.
           </p>

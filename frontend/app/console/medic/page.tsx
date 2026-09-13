@@ -74,10 +74,10 @@ export default function MedicPage() {
         </div>
         <h1 className="display">MEDIC.</h1>
         <p>
-          Isolation Forest on demo (or your) telemetry. Reproduce hits{" "}
-          <span className="mono">/diagnose</span> on a demo service. Patch writes
-          local config.json. GitHub PR only if token+repo are set. Chaos needs{" "}
-          <span className="mono">python3 main.py --profile sre</span>.
+          Isolation Forest on this process&apos;s live request latency, error
+          rate and CPU — the same series you can ingest from your own services
+          via <span className="mono">POST /api/pulse/ingest</span> or OTLP.
+          Chaos distorts those live numbers. GitHub PR only if token+repo are set.
         </p>
       </div>
 
@@ -117,7 +117,8 @@ export default function MedicPage() {
       <div className="glass-card" style={{ padding: 18, marginBottom: 22, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <span className="label label--accent">CHAOS CONTROL</span>
         <span style={{ flex: 1, fontSize: 13, color: "var(--ink-70)" }}>
-          Inject a random fault into a random demo service. Unscripted — the detector has to earn it.
+          Distort this API&apos;s live request/error/CPU series (demo sidecars
+          only if they are running locally). Unscripted — the detector has to earn it.
         </span>
         <button className="btn btn--accent" disabled={chaosBusy} onClick={injectFault}>
           {chaosBusy ? "injecting…" : "Inject random fault ⚡"}
@@ -175,7 +176,7 @@ export default function MedicPage() {
       </section>
 
       <div className="footer-strip">
-        <span className="label">telemetry store: sqlite (lite) / clickhouse (docker) · incidents shared to shield via loom</span>
+        <span className="label">store: Cloud SQL if attached, else sqlite · ClickHouse when ASTRAEA_CLICKHOUSE_URL is set · incidents shared to shield via loom</span>
       </div>
     </>
   );

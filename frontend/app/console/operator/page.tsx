@@ -40,7 +40,7 @@ export default function OperatorPage() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [goal, setGoal] = useState("");
-  const [taskUrl, setTaskUrl] = useState("https://example.com");
+  const [taskUrl, setTaskUrl] = useState("");
   const [successUrl, setSuccessUrl] = useState("");
   const [researchQ, setResearchQ] = useState("");
   const [research, setResearch] = useState<ResearchOut | null>(null);

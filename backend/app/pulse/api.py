@@ -7,7 +7,6 @@ import json
 import time
 
 import httpx
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -135,14 +134,26 @@ class ChaosIn(BaseModel):
 @router.post("/chaos")
 async def chaos(payload: ChaosIn, user=Depends(get_current_user),
                 db: AsyncSession = Depends(get_db)):
-    """Inject a fault — random service AND kind when omitted. This is the MTTD clock start."""
+    """Inject a fault into live telemetry. Demo services if they are up; otherwise
+    the control plane's own series (so Cloud Run MEDIC still has a real MTTD clock)."""
     from app.demo import services as demo
+    from app.pulse import live as pulse_live
+    from app.pulse.models import FaultInjection
+    from app.pulse.store import get_store
 
+    result = None
     try:
         result = await demo.inject_chaos(user.tenant_id, payload.service, payload.kind)
-    except httpx.HTTPError:
-        raise HTTPException(status_code=503, detail="demo services are not reachable "
-                             "(boot with: python3 main.py --profile sre)")
+    except (httpx.HTTPError, OSError, TimeoutError, HTTPException):
+        result = None
+    if not result:
+        result = pulse_live.inject_chaos(payload.kind)
+        db.add(FaultInjection(tenant_id=user.tenant_id, service=result["service"], kind=result["fault"]))
+        await db.commit()
+        await get_store(db).add_deploy(
+            user.tenant_id, result["service"], "deploy",
+            f"chaos:{result['fault']} rolled to {result['service']} (live platform)",
+        )
     return result
 
 

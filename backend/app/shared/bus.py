@@ -34,5 +34,7 @@ async def publish(topic: str, event: dict) -> None:
             pass  # slow consumer drops the live tail; history is in the DB
 
 
-def sse_format(payload: str) -> str:
+def sse_format(payload: str | dict) -> str:
+    if not isinstance(payload, str):
+        payload = json.dumps(payload, default=str)
     return f"data: {payload}\n\n"

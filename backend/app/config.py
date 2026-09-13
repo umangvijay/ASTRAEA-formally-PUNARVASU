@@ -49,9 +49,12 @@ class Settings(BaseSettings):
     # localhost on ANY port is allowed by default (the launcher shifts ports on
     # collision); production locks this down via ASTRAEA_CORS_ORIGINS.
     cors_origins: str = ""
+    # Regional Cloud Run hosts are {service}-{hash}.{region}.run.app — a single
+    # DNS label before .run.app is not enough (that only matched the old URLs).
     cors_origin_regex: str = (
         r"https?://(localhost|127\.0\.0\.1)(:\d+)?|"
-        r"https://[a-z0-9-]+\.(run\.app|web\.app)"
+        r"https://[a-z0-9.-]+\.run\.app|"
+        r"https://[a-z0-9-]+\.web\.app"
     )
     active_profile: str = "full"  # full = every module heartbeat on; infra profiles only pick compose services
     mode: str = "sqlite"  # storage backend: sqlite | postgres
@@ -167,7 +170,18 @@ class Settings(BaseSettings):
     def db_url(self) -> str:
         if self.database_url:
             return self.database_url
-        return f"sqlite+aiosqlite:///{ROOT / 'data' / 'astraea.db'}"
+        instance = os.environ.get("ASTRAEA_CLOUD_SQL_INSTANCE", "").strip()
+        if instance:
+            user = os.environ.get("ASTRAEA_DATABASE_USER", "astraea")
+            password = os.environ.get("ASTRAEA_DATABASE_PASSWORD", "")
+            name = os.environ.get("ASTRAEA_DATABASE_NAME", "astraea")
+            from urllib.parse import quote_plus
+
+            return (
+                f"postgresql+psycopg://{quote_plus(user)}:{quote_plus(password)}"
+                f"@/{name}?host=/cloudsql/{instance}"
+            )
+        return f"sqlite+aiosqlite:///{self.data_dir / 'astraea.db'}"
 
     data_dir_override: str = ""
 
@@ -175,6 +189,13 @@ class Settings(BaseSettings):
     def data_dir(self) -> Path:
         if self.data_dir_override:
             return Path(self.data_dir_override)
+        mounted = Path("/mnt/astraea")
+        if mounted.is_dir() and os.access(str(mounted), os.W_OK):
+            return mounted
+        if os.environ.get("K_SERVICE"):
+            path = Path("/tmp/astraea")
+            path.mkdir(parents=True, exist_ok=True)
+            return path
         return ROOT / "data"
 
     @property
@@ -192,18 +213,47 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# production guardrails: a deploy without real secrets must fail at boot, not at 3am
-if settings.is_production:
-    if not settings.jwt_secret or len(settings.jwt_secret) < 32:
-        raise RuntimeError("ASTRAEA_JWT_SECRET must be set (32+ chars) in production")
-    if not settings.ingest_token:
-        raise RuntimeError("ASTRAEA_INGEST_TOKEN must be set in production")
-    import os as _os
-    if _os.environ.get("ASTRAEA_VAULT_KEY") and len(_os.environ.get("ASTRAEA_VAULT_KEY", "")) < 32:
+
+def on_cloud_run() -> bool:
+    """Cloud Run / Cloud Functions set K_SERVICE to the service name."""
+    return bool(os.environ.get("K_SERVICE"))
+
+
+def apply_production_guards() -> None:
+    """Refuse a laptop production boot without secrets; on Cloud Run, boot anyway.
+
+    Importing this module must never raise — Alembic and the Cloud Run entrypoint
+    need the Settings object even when JWT/ingest env vars were omitted.
+    """
+    import logging as _logging
+    import secrets as _secrets
+
+    log = _logging.getLogger("astraea.config")
+    vault = os.environ.get("ASTRAEA_VAULT_KEY")
+    if vault and len(vault) < 32:
         raise RuntimeError("ASTRAEA_VAULT_KEY must be 32+ bytes when provided")
+
+    if not settings.is_production:
+        if not settings.jwt_secret:
+            settings.jwt_secret = "ephemeral-" + _secrets.token_hex(24)
+        return
+
+    cloud = on_cloud_run()
+    if not settings.jwt_secret or len(settings.jwt_secret) < 32:
+        if not cloud:
+            raise RuntimeError("ASTRAEA_JWT_SECRET must be set (32+ chars) in production")
+        settings.jwt_secret = "cloud-" + _secrets.token_hex(24)
+        log.error("ASTRAEA_JWT_SECRET missing — ephemeral Cloud Run secret; sessions reset per instance")
+    if not settings.ingest_token:
+        if not cloud:
+            raise RuntimeError("ASTRAEA_INGEST_TOKEN must be set in production")
+        settings.ingest_token = "cloud-ingest-" + _secrets.token_hex(16)
+        log.error("ASTRAEA_INGEST_TOKEN missing — ephemeral Cloud Run ingest token")
+
 
 if not settings.jwt_secret:
     import secrets as _secrets
 
     settings.jwt_secret = "ephemeral-" + _secrets.token_hex(24)
     # tokens rotate on restart in dev; the launcher warns until ASTRAEA_JWT_SECRET is set
+    # Cloud Run production fills a stronger secret in apply_production_guards()
