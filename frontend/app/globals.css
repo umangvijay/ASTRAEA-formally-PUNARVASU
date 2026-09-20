@@ -27,8 +27,10 @@
   --oxide: #b3402e;
 
   /* glass tokens */
-  --glass-bg: rgba(255, 253, 248, 0.3);
+  --glass-bg: rgba(255, 253, 248, 0.84);
   --glass-border: rgba(20, 20, 20, 0.12);
+  --card-bg: rgba(255, 253, 248, 0.86);
+  --card-border: rgba(20, 20, 20, 0.12);
   --glass-blur: 28px;
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
   --glass-shadow-hover: 0 16px 48px rgba(232, 93, 42, 0.08), 0 4px 16px rgba(0, 0, 0, 0.06);
@@ -107,6 +109,24 @@ img, svg, video { max-width: 100%; height: auto; }
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
+}
+
+/* ── ambient sky (every page except home) ────────────────────────
+   Same observatory theme as home: the milky way, nebulas and comets
+   stay clearly visible behind frosted panels — dimmed just enough to
+   keep body text readable, never flattened to a solid page color. */
+.cosmos--ambient .cosmos-sky { opacity: 0.6; }
+.cosmos--ambient .cosmos-stars { opacity: 0.66; }
+.cosmos--ambient .cosmos-sky-veil {
+  background:
+    radial-gradient(ellipse 42% 38% at 88% -6%, rgba(8, 7, 6, 0.3) 0%, transparent 60%),
+    radial-gradient(ellipse 90% 80% at 50% 40%, transparent 42%, rgba(8, 7, 6, 0.26) 100%),
+    linear-gradient(180deg, rgba(8, 7, 6, 0.04), rgba(8, 7, 6, 0.24));
+}
+.cosmos--ambient .comet { filter: brightness(0.92); }
+html[data-theme="light"] .cosmos--ambient .cosmos-sky { opacity: 0.42; }
+html[data-theme="light"] .cosmos--ambient .cosmos-sky-veil {
+  background: linear-gradient(180deg, rgba(250, 247, 242, 0.3) 0%, rgba(250, 247, 242, 0.58) 100%);
 }
 .cosmos-body {
   position: absolute;
@@ -310,12 +330,42 @@ html { scroll-behavior: smooth; }
 
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
+  to   { opacity: 1; transform: translateY(0); }}
 
 @keyframes staggerIn {
   from { opacity: 0; transform: translateY(18px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── route transition + shared entrance motion ──────────────────────
+   The template remounts on navigation. Opacity-only on the wrapper so
+   position:fixed chrome inside pages keeps its containing block. */
+@keyframes pageFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes cardRise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes starTwinkle {
+  from { opacity: 0.4; }
+  to   { opacity: 0.75; }
+}
+.page-enter { animation: pageFade 0.2s ease both; }
+.page-enter .glass-card,
+.page-enter .panel,
+.page-enter .module-card,
+.page-enter .stat-card {
+  animation: cardRise 0.32s var(--ease) backwards;
+}
+.page-enter .glass-card:nth-child(2), .page-enter .panel:nth-child(2) { animation-delay: 0.03s; }
+.page-enter .glass-card:nth-child(3), .page-enter .panel:nth-child(3) { animation-delay: 0.06s; }
+.page-enter .glass-card:nth-child(4), .page-enter .panel:nth-child(4) { animation-delay: 0.09s; }
+.page-enter .glass-card:nth-child(n+5), .page-enter .panel:nth-child(n+5) { animation-delay: 0.12s; }
+@media (prefers-reduced-motion: reduce) {
+  .page-enter, .page-enter .glass-card, .page-enter .panel,
+  .page-enter .module-card, .page-enter .stat-card { animation: none; }
 }
 
 @keyframes glowPulse {
@@ -828,7 +878,7 @@ input:focus, textarea:focus { outline: none; }
   position: relative;
   z-index: 2;
   isolation: isolate;
-  background: color-mix(in srgb, var(--paper) 96%, transparent);
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
 }
 .main { flex: 1; padding: 30px 34px 80px; max-width: 1060px; min-width: 0; position: relative; z-index: 2; }
 
@@ -1367,7 +1417,7 @@ footer {
   padding: 0;
   position: relative;
   z-index: 2;
-  background: color-mix(in srgb, var(--paper) 96%, transparent);
+  background: color-mix(in srgb, var(--paper) 84%, transparent);
 }
 .docs-side {
   flex: 0 0 260px;
@@ -1582,7 +1632,11 @@ html[data-theme="dark"] .hero {
 }
 
 /* panels & commandbar */
-html[data-theme="dark"] .panel { background: var(--paper-raised); }
+html[data-theme="dark"] .panel {
+  background: color-mix(in srgb, var(--paper-raised) 70%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
 html[data-theme="dark"] .panel::before { border-color: var(--ink-30); }
 html[data-theme="dark"] .panel::after { border-color: var(--ink-30); }
 html[data-theme="dark"] .panel--accent::before { border-color: var(--accent); }
@@ -1682,16 +1736,22 @@ html[data-theme="dark"] .manifesto em {
 html[data-theme="dark"] .section { color: var(--ink); }
 html[data-theme="dark"] .section p { color: var(--ink-70); }
 html[data-theme="dark"] .docs-shell {
-  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  background: color-mix(in srgb, var(--paper) 40%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 html[data-theme="dark"] .docs-side {
-  background: var(--paper-raised);
+  background: color-mix(in srgb, var(--paper-raised) 72%, transparent);
   border-color: var(--line);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 html[data-theme="dark"] .docs-main {
-  background: var(--paper-raised);
+  background: color-mix(in srgb, var(--paper-raised) 84%, transparent);
   border-color: var(--line);
   color: var(--ink);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 html[data-theme="dark"] .lightbox {
   background: rgba(8, 7, 6, 0.84);
@@ -1704,8 +1764,10 @@ html[data-theme="dark"] .pagehead p { color: var(--ink-70); }
 
 /* rail dark */
 html[data-theme="dark"] .rail {
-  background: color-mix(in srgb, var(--paper-dim) 92%, transparent);
+  background: color-mix(in srgb, var(--paper-dim) 58%, transparent);
   border-color: var(--line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 /* module card parts dark */
@@ -1904,9 +1966,12 @@ html[data-theme="dark"] .skeleton {
 
 .section {
   padding: 64px 40px;
-  background: color-mix(in srgb, var(--paper) 55%, transparent);
+  background: color-mix(in srgb, var(--paper) 68%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+}
+html[data-theme="light"] .section {
+  background: color-mix(in srgb, var(--paper) 80%, transparent);
 }
 .section--sky {
   background: transparent;
@@ -2151,17 +2216,24 @@ html[data-theme="dark"] .skeleton {
 }
 .shell {
   min-height: calc(100vh - 56px);
-  background: color-mix(in srgb, var(--paper) 97%, transparent);
+  background: color-mix(in srgb, var(--paper) 48%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+html[data-theme="light"] .shell {
+  background: color-mix(in srgb, var(--paper) 78%, transparent);
 }
 .rail {
   top: 56px;
   max-height: calc(100vh - 56px);
-  background: color-mix(in srgb, var(--paper-dim) 88%, transparent);
+  background: color-mix(in srgb, var(--paper-dim) 62%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .pagehead {
   padding: 20px 24px 18px;
   margin-bottom: 28px;
-  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  background: color-mix(in srgb, var(--paper) 68%, transparent);
   border: 1px solid var(--line);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -2175,15 +2247,21 @@ html[data-theme="dark"] .skeleton {
   transform: translateY(-3px);
 }
 .docs-shell {
-  background: color-mix(in srgb, var(--paper) 97%, transparent);
+  background: color-mix(in srgb, var(--paper) 46%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 .docs-side {
   top: 56px;
   height: calc(100vh - 56px);
-  background: color-mix(in srgb, var(--paper-raised) 96%, transparent);
+  background: color-mix(in srgb, var(--paper-raised) 74%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 .docs-main {
-  background: color-mix(in srgb, var(--paper-raised) 96%, transparent);
+  background: color-mix(in srgb, var(--paper-raised) 86%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 .docs-dash a {
   background: color-mix(in srgb, var(--paper-dim) 80%, transparent);
@@ -2536,3 +2614,583 @@ html[data-theme="dark"] .lightbox-card .btn--accent { color: #faf7f2 !important;
   .commandbar .wordmark { font-size: 12px; }
   .public-nav .theme-toggle { padding: 6px 8px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   COSMOS v3 — "return of light"
+   Nebulae, galaxies, comets, triple starfield. Night = deep space;
+   Day = dawn sky. All GPU-friendly (transform/opacity only).
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── deep-space night palette ── */
+html[data-theme="dark"] {
+  --paper: #000000;             /* true black night */
+  --paper-raised: #0b0b0d;
+  --paper-dim: #000000;
+  --starlight: #e9e9e4;         /* neutral starlight for accents */
+  --accent-glow: rgba(255, 158, 87, 0.16);
+  --card-bg: rgba(10, 10, 12, 0.66);
+  --card-border: rgba(243, 238, 228, 0.14);
+}
+html[data-theme="dark"] body { background: var(--paper); }
+
+/* the sky image darkens toward space — but the milky way stays visible
+   on inner pages (frosted panels need a sky behind them to be "glass") */
+html[data-theme="dark"] .cosmos-sky-wrap { background: #000000; }
+html[data-theme="dark"] .cosmos-sky {
+  opacity: 0.9;
+  filter: brightness(0.42) saturate(1.18) contrast(1.14);
+}
+/* true-space veil — black, with only a whisper of nebula tint */
+html[data-theme="dark"] .cosmos-sky-veil {
+  background:
+    radial-gradient(ellipse 60% 44% at 76% 12%, rgba(150, 120, 220, 0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 52% 40% at 16% 80%, rgba(120, 150, 170, 0.07) 0%, transparent 62%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.42));
+}
+html[data-theme="dark"] .cosmos-nebula { filter: saturate(0.5) brightness(0.75); }
+
+/* ── nebulae: huge soft clouds, slow drift ── */
+.cosmos-nebula {
+  position: absolute; inset: -20%;
+  pointer-events: none; opacity: 0; transition: opacity 2s var(--ease);
+  will-change: transform;
+}
+.nebula-rose {
+  background:
+    radial-gradient(38% 30% at 18% 78%, rgba(196, 86, 140, 0.20) 0%, transparent 70%),
+    radial-gradient(30% 26% at 70% 16%, rgba(120, 88, 220, 0.16) 0%, transparent 72%);
+  animation: nebula-drift-a 110s linear infinite alternate;
+}
+.nebula-teal {
+  background:
+    radial-gradient(34% 28% at 84% 72%, rgba(52, 160, 170, 0.15) 0%, transparent 70%),
+    radial-gradient(26% 22% at 12% 22%, rgba(70, 110, 200, 0.13) 0%, transparent 74%);
+  animation: nebula-drift-b 140s linear infinite alternate;
+}
+html[data-theme="dark"] .cosmos-nebula { opacity: 1; mix-blend-mode: screen; }
+@keyframes nebula-drift-a { from { transform: translate3d(-2%, -1%, 0) scale(1); } to { transform: translate3d(2%, 1.5%, 0) scale(1.06); } }
+@keyframes nebula-drift-b { from { transform: translate3d(1.5%, 1%, 0) scale(1.04); } to { transform: translate3d(-1.5%, -1%, 0) scale(1); } }
+
+/* ── galaxies: tilted discs with glowing cores ── */
+.cosmos-galaxy {
+  position: absolute; width: 34vmax; height: 34vmax; max-width: 560px; max-height: 560px;
+  border-radius: 50%; pointer-events: none; opacity: 0; transition: opacity 2.5s var(--ease);
+  will-change: transform;
+}
+.galaxy-andromeda {
+  top: -8vmax; right: -10vmax;
+  background:
+    radial-gradient(closest-side at 50% 50%, rgba(255, 236, 200, 0.30) 0%, rgba(255, 214, 160, 0.12) 26%, transparent 62%),
+    conic-gradient(from 40deg, rgba(150, 130, 255, 0.10), transparent 25%, rgba(110, 140, 255, 0.12) 50%, transparent 72%, rgba(150, 130, 255, 0.10));
+  transform: rotate(18deg) scaleY(0.42);
+  animation: galaxy-spin-a 240s linear infinite;
+}
+.galaxy-pinwheel {
+  bottom: -12vmax; left: -12vmax;
+  background:
+    radial-gradient(closest-side at 50% 50%, rgba(200, 235, 255, 0.22) 0%, rgba(160, 200, 255, 0.10) 30%, transparent 64%),
+    conic-gradient(from 200deg, rgba(120, 200, 220, 0.10), transparent 22%, rgba(170, 140, 255, 0.10) 48%, transparent 70%, rgba(120, 200, 220, 0.10));
+  transform: rotate(-24deg) scaleY(0.5);
+  animation: galaxy-spin-b 300s linear infinite;
+}
+html[data-theme="dark"] .cosmos-galaxy { opacity: 0.95; mix-blend-mode: screen; }
+@keyframes galaxy-spin-a { from { transform: rotate(18deg) scaleY(0.42) rotate(0turn); } to { transform: rotate(18deg) scaleY(0.42) rotate(1turn); } }
+@keyframes galaxy-spin-b { from { transform: rotate(-24deg) scaleY(0.5) rotate(0turn); } to { transform: rotate(-24deg) scaleY(0.5) rotate(1turn); } }
+
+/* ── starfield: triple depth with twinkle ── */
+.cosmos-stars.stars-far  { transform: scale(0.55); opacity: 0.36; filter: blur(0.5px) brightness(0.72); animation: twinkle-far 9s ease-in-out infinite; }
+.cosmos-stars.stars-near { transform: scale(1.6); opacity: 0.42; filter: blur(0.3px); animation: twinkle-near 6s ease-in-out infinite; }
+@keyframes twinkle-far  { 0%, 100% { opacity: 0.30; } 50% { opacity: 0.44; } }
+@keyframes twinkle-near { 0%, 100% { opacity: 0.42; } 50% { opacity: 0.58; } }
+
+/* ── comets ── */
+.cosmos-comets { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.comet {
+  position: absolute; top: 12%; left: -12%;
+  width: 130px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, rgba(255, 250, 235, 0.95), rgba(160, 190, 255, 0.35) 45%, transparent);
+  filter: drop-shadow(0 0 6px rgba(200, 220, 255, 0.8));
+  opacity: 0; transform: rotate(14deg);
+  animation: comet-fly 16s linear infinite;
+}
+.comet-2 { top: 34%; width: 90px; animation-duration: 23s; animation-delay: 7s; transform: rotate(9deg); }
+.comet-3 { top: 6%;  width: 160px; animation-duration: 19s; animation-delay: 13s; transform: rotate(19deg); }
+@keyframes comet-fly {
+  0%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(14deg) scaleX(0.4); }
+  4%   { opacity: 1; }
+  16%  { opacity: 0; transform: translate3d(125vw, 30vh, 0) rotate(14deg) scaleX(1); }
+  100% { opacity: 0; transform: translate3d(125vw, 30vh, 0) rotate(14deg); }
+}
+.comet-2 { animation-name: comet-fly-2; }
+@keyframes comet-fly-2 {
+  0%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(9deg) scaleX(0.4); }
+  4%   { opacity: 1; }
+  15%  { opacity: 0; transform: translate3d(120vw, 18vh, 0) rotate(9deg) scaleX(1); }
+  100% { opacity: 0; transform: translate3d(120vw, 18vh, 0) rotate(9deg); }
+}
+.comet-3 { animation-name: comet-fly-3; }
+@keyframes comet-fly-3 {
+  0%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(19deg) scaleX(0.4); }
+  4%   { opacity: 1; }
+  17%  { opacity: 0; transform: translate3d(125vw, 42vh, 0) rotate(19deg) scaleX(1); }
+  100% { opacity: 0; transform: translate3d(125vw, 42vh, 0) rotate(19deg); }
+}
+
+/* the returning light: sol breathes warmer in night */
+html[data-theme="dark"] .cosmos-sol-core {
+  box-shadow: 0 0 34px 10px rgba(255, 170, 90, 0.30), 0 0 90px 30px rgba(255, 140, 70, 0.14);
+  animation: sol-breathe 7s ease-in-out infinite;
+}
+@keyframes sol-breathe {
+  0%, 100% { box-shadow: 0 0 30px 8px rgba(255, 170, 90, 0.26), 0 0 80px 26px rgba(255, 140, 70, 0.12); }
+  50%      { box-shadow: 0 0 40px 12px rgba(255, 180, 100, 0.36), 0 0 110px 36px rgba(255, 150, 80, 0.18); }
+}
+
+/* ── day = dawn sky (fixes the washed-out watercolor) ── */
+:root { --dawn-sky: linear-gradient(180deg, #eef1fb 0%, #f7f3ec 46%, #faf7f2 100%); }
+html:not([data-theme="dark"]) body { background: var(--dawn-sky); }
+html:not([data-theme="dark"]) .nebula-rose { opacity: 0.5; }
+html:not([data-theme="dark"]) .nebula-teal { opacity: 0.4; }
+html:not([data-theme="dark"]) .galaxy-andromeda { opacity: 0.30; }
+html:not([data-theme="dark"]) .galaxy-pinwheel { opacity: 0.22; }
+html:not([data-theme="dark"]) .cosmos-comets { display: none; }   /* comets are a night thing */
+html:not([data-theme="dark"]) .cosmos-stars { opacity: 0.22; }
+
+/* day-mode contrast repairs (tagline + buttons were washed out) */
+html:not([data-theme="dark"]) .hero .label--accent { color: var(--accent-ink); letter-spacing: 0.12em; }
+html:not([data-theme="dark"]) .hero .lead { color: var(--ink-70); }
+html:not([data-theme="dark"]) .btn--accent {
+  color: #fffdf8;
+  border-color: var(--accent-ink);
+  box-shadow: 0 2px 0 var(--accent-ink), var(--glass-shadow);
+}
+html:not([data-theme="dark"]) .hero h1 em {
+  color: var(--accent-ink);
+  text-shadow: none;
+}
+html:not([data-theme="dark"]) .panel.glass { background: rgba(255, 253, 248, 0.66); }
+
+/* ── accessibility: respect reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .cosmos-nebula, .cosmos-galaxy, .comet,
+  .cosmos-stars.stars-far, .cosmos-stars.stars-near,
+  html[data-theme="dark"] .cosmos-sol-core { animation: none !important; }
+}
+
+/* ── performance guard: the cosmos sits still under the console ── */
+.cosmos, .cosmos-bodies { pointer-events: none; }
+
+/* ═══════════════════════════════════════════════════════════════
+   SOLSYS v1 — the living solar system
+   3D globes (texture + terminator + specular), orbit rings, moons,
+   galaxy rotation, pan/zoom stage, feature card. GPU-only motion.
+   ═══════════════════════════════════════════════════════════════ */
+
+.solsys {
+  position: fixed; inset: 0; z-index: 0;
+  container-type: size; touch-action: none; cursor: grab;
+}
+.solsys:active { cursor: grabbing; }
+.solsys-stage {
+  position: absolute; left: 50%; top: 50%;
+  width: 0; height: 0; will-change: transform;
+}
+
+/* galaxy rotates — we orbit the Milky Way (very slow, subtle) */
+.galactic-plane { animation: galactic-rotate 900s linear infinite; transform-origin: 50% 50%; }
+@keyframes galactic-rotate { from { transform: rotate(0turn); } to { transform: rotate(1turn); } }
+html[data-theme="dark"] .galactic-plane { animation-duration: 1400s; }
+
+/* orbit rings — hairline ellipses, tilted per body */
+.solsys-ring {
+  position: absolute; left: 50%; top: 50%;
+  border: 1px solid var(--line); border-radius: 50%;
+  opacity: 0.55; pointer-events: none;
+}
+html[data-theme="dark"] .solsys-ring { border-color: rgba(205, 214, 255, 0.14); }
+
+/* the sun = core */
+.solsys-sun { position: absolute; left: 0; top: 0; will-change: transform; }
+.solsys-body--sun {
+  width: 64px; height: 64px; border-radius: 50%; padding: 0; border: none;
+  background: radial-gradient(circle at 38% 34%, #fff3d6 0%, #ffcf87 34%, #ff9a45 62%, #e2622a 100%);
+  box-shadow:
+    0 0 26px 6px rgba(255, 190, 110, 0.45),
+    0 0 80px 24px rgba(255, 150, 70, 0.22),
+    inset -10px -12px 22px rgba(120, 40, 10, 0.45),
+    inset 6px 6px 14px rgba(255, 245, 220, 0.5);
+  cursor: pointer; animation: solsys-sun-breathe 7s ease-in-out infinite;
+}
+@keyframes solsys-sun-breathe {
+  0%, 100% { box-shadow: 0 0 22px 5px rgba(255,190,110,0.40), 0 0 70px 20px rgba(255,150,70,0.18), inset -10px -12px 22px rgba(120,40,10,0.45), inset 6px 6px 14px rgba(255,245,220,0.5); }
+  50%      { box-shadow: 0 0 34px 9px rgba(255,200,120,0.55), 0 0 110px 34px rgba(255,160,80,0.26), inset -10px -12px 22px rgba(120,40,10,0.40), inset 6px 6px 14px rgba(255,245,220,0.6); }
+}
+
+/* planet wrapper — positioned by JS (transform), never flattens the globe */
+.solsys-body-wrap { position: absolute; left: 0; top: 0; will-change: transform; }
+
+/* the 3D globe: texture spins inside a clipped sphere, shading sits on top */
+.solsys-body {
+  position: relative; display: block; padding: 0; border: none;
+  border-radius: 50%; background: transparent; cursor: pointer;
+  transition: filter 200ms var(--ease);
+}
+.solsys-body.is-hover { filter: brightness(1.15) drop-shadow(0 0 10px rgba(255,200,130,0.35)); }
+.solsys-globe {
+  position: absolute; inset: 0; border-radius: 50%; overflow: hidden;
+  background: #0a0d18;
+  box-shadow:
+    inset 6px 8px 14px rgba(255, 250, 235, 0.22),   /* limb light */
+    inset -8px -10px 18px rgba(0, 0, 0, 0.78),      /* terminator */
+    0 0 0 1px rgba(255, 250, 235, 0.10);
+}
+.solsys-tex {
+  position: absolute; inset: -20% -60%; width: 220%; height: 100%;
+  object-fit: cover; animation: solsys-spin 46s linear infinite; /* rotation of the world */
+}
+.solsys-body:nth-child(odd) .solsys-tex { animation-duration: 64s; }
+@keyframes solsys-spin { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.solsys-shade {
+  position: absolute; inset: 0; border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 30%, rgba(255, 250, 235, 0.20) 0%, transparent 42%),
+    radial-gradient(circle at 72% 74%, rgba(0, 0, 0, 0.55) 0%, transparent 58%);
+}
+.solsys-spec {
+  position: absolute; left: 18%; top: 12%; width: 26%; height: 16%;
+  border-radius: 50%; background: rgba(255, 252, 240, 0.45);
+  filter: blur(2px); transform: rotate(-24deg);
+}
+
+/* saturn-style ring */
+.solsys-planet-ring {
+  position: absolute; left: 50%; top: 50%;
+  width: 210%; height: 210%;
+  transform: translate(-50%, -50%) rotate(-16deg) scaleY(0.32);
+  border-radius: 50%;
+  border: 3px solid rgba(226, 214, 180, 0.5);
+  box-shadow: 0 0 0 2px rgba(226, 214, 180, 0.16), inset 0 0 0 2px rgba(226, 214, 180, 0.2);
+  pointer-events: none;
+}
+
+/* moons orbiting their planet (CSS-driven, JS sets size/speed) */
+.solsys-moon-orbit {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%; pointer-events: none;
+  animation: solsys-moon-orbit 8s linear infinite;
+}
+@keyframes solsys-moon-orbit { from { transform: translate(-50%,-50%) rotate(0turn); } to { transform: translate(-50%,-50%) rotate(1turn); } }
+.solsys-moon {
+  position: absolute; left: 50%; top: 0;
+  transform: translate(-50%, -50%); border-radius: 50%; overflow: hidden;
+  background: #10131e;
+  box-shadow: inset -2px -2px 4px rgba(0,0,0,0.8), inset 1px 1px 3px rgba(255,250,235,0.25), 0 0 4px rgba(0,0,0,0.5);
+}
+.solsys-moon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* labels */
+.solsys-label {
+  position: absolute; left: 50%; top: calc(100% + 6px); transform: translateX(-50%);
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.14em;
+  color: var(--ink-50); white-space: nowrap; opacity: 0; transition: opacity 200ms var(--ease);
+  pointer-events: none; text-transform: uppercase;
+}
+.solsys-label.show { opacity: 1; }
+.solsys-sun .solsys-label { opacity: 0.8; top: calc(100% + 8px); }
+
+/* feature card */
+.solsys-card {
+  position: fixed; right: 26px; bottom: 26px; z-index: 60;
+  width: min(360px, calc(100vw - 40px));
+  background: var(--paper-raised);
+  border: 1px solid var(--line-strong);
+  box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.12);
+  padding: 18px 20px;
+  animation: solsys-card-in 240ms var(--ease) both;
+}
+@keyframes solsys-card-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.solsys-card-x {
+  position: absolute; top: 8px; right: 8px; border: none; background: transparent;
+  font-size: 13px; cursor: pointer; color: var(--ink-50); padding: 4px 8px;
+}
+.solsys-card-x:hover { color: var(--ink); }
+.solsys-moons { border-top: 1px dotted var(--line); margin: 4px 0 10px; padding-top: 8px; }
+.solsys-moon-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+.solsys-moon-row b { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; white-space: nowrap; }
+.solsys-moon-row span:last-child { color: var(--ink-50); }
+.solsys-moon-dot {
+  width: 16px; height: 16px; border-radius: 50%; overflow: hidden; flex: 0 0 16px;
+  box-shadow: inset -2px -2px 3px rgba(0,0,0,0.7);
+}
+.solsys-moon-dot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* hint */
+.solsys-hint {
+  position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
+  z-index: 55; color: var(--ink-30); pointer-events: none; font-size: 9.5px;
+}
+
+/* keep the system behind app content but clickable where empty */
+.solsys { z-index: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .solsys-tex, .solsys-moon-orbit, .solsys-body--sun, .galactic-plane { animation: none !important; }
+}
+
+/* stage sits right-of-center on wide screens so the hero copy breathes */
+@media (min-width: 1024px) {
+  .solsys-stage { left: 62%; top: 46%; }
+}
+.solsys-hint { position: fixed; bottom: 14px; left: 50%; }
+@media (min-width: 1024px) {
+  .solsys-stage { left: 68%; top: 34%; }
+}
+
+/* ── solsys polish pass ── */
+/* night: hero tagline + scroll hint need real contrast */
+html[data-theme="dark"] .hero .label--accent { color: #ffb37a; }
+html[data-theme="dark"] .hero .section-lead, html[data-theme="dark"] .hero .lead { color: rgba(243, 238, 228, 0.78); }
+html[data-theme="dark"] .solsys-hint { color: rgba(205, 214, 255, 0.5); }
+
+/* feature card: scrolls on short screens, sits above content on mobile */
+@media (max-width: 720px) {
+  .solsys-card { right: 12px; left: 12px; bottom: 12px; width: auto; max-height: 62vh; overflow-y: auto; }
+}
+@media (max-height: 700px) {
+  .solsys-card { max-height: 58vh; overflow-y: auto; }
+}
+
+/* sun label should not duplicate the wordmark confusion — keep it subtle */
+.solsys-sun .solsys-label { color: rgba(255, 200, 140, 0.75); }
+
+/* hover lift for planets (scale on the globe, wrapper keeps orbit transform) */
+.solsys-body:hover .solsys-globe { box-shadow:
+  inset 6px 8px 14px rgba(255, 250, 235, 0.28),
+  inset -8px -10px 18px rgba(0, 0, 0, 0.74),
+  0 0 0 1px rgba(255, 250, 235, 0.18), 0 0 18px rgba(255, 190, 110, 0.25); }
+
+/* selected planet gets an orbiting focus ring */
+.solsys-body.is-selected .solsys-globe { box-shadow:
+  inset 6px 8px 14px rgba(255, 250, 235, 0.24),
+  inset -8px -10px 18px rgba(0, 0, 0, 0.78),
+  0 0 0 2px var(--accent), 0 0 20px rgba(255, 140, 70, 0.35); }
+
+/* the sky must never block page content — only the bodies are interactive */
+.solsys { pointer-events: none; cursor: default; }
+.solsys:active { cursor: default; }
+.solsys-body, .solsys-body--sun { pointer-events: auto; }
+
+/* ═══════════════════════════════════════════════════════════════
+   COSMIC CONSOLE UI — chips, hero, drawer, dock, ra/dec
+   ═══════════════════════════════════════════════════════════════ */
+.chip {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.12em;
+  color: var(--ink-70); background: var(--card-bg, rgba(8, 12, 24, 0.55));
+  border: 1px solid var(--card-border, rgba(255,255,255,0.12));
+  padding: 6px 12px; border-radius: 3px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+html[data-theme="light"] .chip { background: rgba(245, 242, 236, 0.7); }
+.mono-chip {
+  font-family: var(--font-mono); font-size: 10px; padding: 3px 9px;
+  border: 1px solid var(--card-border, rgba(255,255,255,0.14));
+  background: transparent; color: var(--ink-50); cursor: pointer; border-radius: 3px;
+}
+.mono-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.solsys-hero {
+  position: fixed; left: clamp(20px, 4vw, 56px); top: 50%; transform: translateY(-52%);
+  z-index: 40; width: min(470px, calc(100vw - 40px));
+  background: var(--card-bg, rgba(8, 12, 24, 0.62));
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--card-border, rgba(255,255,255,0.12));
+  border-radius: 10px; padding: clamp(20px, 3vw, 34px);
+  transition: opacity 500ms var(--ease), transform 500ms var(--ease);
+}
+html[data-theme="light"] .solsys-hero { background: rgba(250, 247, 242, 0.93); }
+.solsys-hero.hero-hidden { opacity: 0; transform: translateY(-52%) scale(0.97); pointer-events: none; }
+.solsys-hero h1 { font-size: clamp(44px, 6vw, 68px); margin: 10px 0 8px; line-height: 1; }
+.solsys-hero .hero-lead { font-size: 14.5px; color: var(--ink-70); line-height: 1.65; margin: 0 0 18px; }
+.solsys-hero .hl { background: var(--accent); color: #fff; padding: 2px 8px; }
+.hero-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.planet-drawer {
+  position: fixed; right: clamp(12px, 3vw, 40px); top: 50%; transform: translateY(-50%);
+  z-index: 45; width: min(400px, calc(100vw - 24px));
+  max-height: calc(100vh - 140px); overflow-y: auto;
+  background: var(--drawer-bg, rgba(6, 9, 20, 0.88));
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--card-border, rgba(255,255,255,0.12));
+  border-radius: 10px; padding: 22px 24px;
+  animation: drawer-in 300ms var(--ease) both;
+}
+html[data-theme="light"] .planet-drawer { background: rgba(242, 238, 230, 0.92); }
+@keyframes drawer-in { from { opacity: 0; transform: translateY(-50%) translateX(24px); } to { opacity: 1; transform: translateY(-50%); } }
+.drawer-x { background: none; border: none; color: var(--ink-50); font-size: 14px; cursor: pointer; padding: 4px 8px; }
+.drawer-x:hover { color: var(--ink); }
+.nasa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.nasa-grid > div { background: var(--paper-raised); padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; }
+.nasa-grid .k { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.12em; color: var(--ink-50); }
+.nasa-grid .v { font-family: var(--font-mono); font-size: 13px; color: var(--ink); }
+
+.planet-dock {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 40; display: flex; gap: 4px; align-items: center;
+  background: var(--card-bg, rgba(8, 12, 24, 0.6));
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--card-border, rgba(255,255,255,0.12));
+  border-radius: 8px; padding: 6px;
+  max-width: calc(100vw - 24px); overflow-x: auto;
+}
+.dock-item {
+  display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: none;
+  background: transparent; cursor: pointer; border-radius: 5px; color: var(--ink-70);
+  font-family: var(--font-mono); white-space: nowrap;
+}
+.dock-item:hover { background: var(--paper-dim); color: var(--ink); }
+.dock-item.active { background: var(--paper-dim); color: var(--ink); box-shadow: inset 0 0 0 1px var(--accent); }
+.dock-item b { font-size: 11px; display: block; }
+.dock-item i { font-style: normal; font-size: 9px; color: var(--ink-50); display: block; }
+.dock-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.dot-mercury { background: #9aa0ab; } .dot-venus { background: #e3c88f; }
+.dot-earth { background: #3b82f6; } .dot-mars { background: #e2582a; }
+.dot-jupiter { background: #d9a05f; } .dot-saturn { background: #d9c08f; }
+.dot-uranus { background: #7fd4de; } .dot-neptune { background: #5b7bd5; }
+
+.ra-dec {
+  position: fixed; right: 18px; bottom: 18px; z-index: 40;
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-end;
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em;
+  color: var(--ink-50); pointer-events: none;
+}
+.ra-dec-live { color: var(--accent); }
+@media (max-width: 900px) {
+  .ra-dec { display: none; }
+  .planet-dock { bottom: 10px; }
+  .planet-drawer { top: auto; bottom: 74px; transform: none; max-height: 52vh; }
+  @keyframes drawer-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+}
+
+/* the observatory is always deep space, in both themes */
+.solsys-mount { background: #02040a !important; }
+
+/* ── cosmic console: real classes (no tailwind in this project) ── */
+.home-stage { position: fixed; inset: 0; overflow: hidden; z-index: 1; }
+.solsys-mount { position: fixed; inset: 0; z-index: 0; cursor: grab; }
+.solsys-mount:active { cursor: grabbing; }
+.solsys-loading { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; background: #02040a; }
+.cosmos-topbar {
+  position: fixed; top: 66px; left: 0; right: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; pointer-events: none;
+}
+.cosmos-topbar .chip { pointer-events: auto; }
+.chip-row { display: inline-flex; align-items: center; gap: 8px; }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; }
+
+/* ═══════════════════════════════════════════════════════════════
+   DAY-MODE CONTRAST for the cosmic console + drawer polish + mobile
+   ═══════════════════════════════════════════════════════════════ */
+
+/* light theme: the console overlays sit on a bright sky — use ink on glass */
+html:not([data-theme="dark"]) .solsys-hero {
+  background: rgba(250, 247, 242, 0.93);
+  border-color: rgba(20, 20, 20, 0.22);
+  box-shadow: 0 18px 50px rgba(20, 20, 20, 0.14);
+}
+html:not([data-theme="dark"]) .solsys-hero h1 { color: var(--ink); text-shadow: none; }
+html:not([data-theme="dark"]) .solsys-hero .hero-lead,
+html:not([data-theme="dark"]) .solsys-hero .label,
+html:not([data-theme="dark"]) .solsys-hero .label--accent { color: var(--accent-ink); }
+html:not([data-theme="dark"]) .solsys-hero .hero-lead { color: var(--ink-70); }
+html:not([data-theme="dark"]) .solsys-hero .label--ink { color: var(--ink-50); }
+html:not([data-theme="dark"]) .solsys-hero .btn--ghost { color: var(--ink); border-color: var(--line-strong); }
+html:not([data-theme="dark"]) .solsys-hero .btn--ghost:hover { border-color: var(--ink); }
+
+html:not([data-theme="dark"]) .chip,
+html:not([data-theme="dark"]) .planet-dock,
+html:not([data-theme="dark"]) .ra-dec span {
+  color: var(--ink-70);
+  background: rgba(250, 247, 242, 0.72);
+  border-color: rgba(20, 20, 20, 0.2);
+}
+html:not([data-theme="dark"]) .planet-dock { color: var(--ink-70); }
+html:not([data-theme="dark"]) .dock-item { color: var(--ink-70); }
+html:not([data-theme="dark"]) .dock-item:hover, html:not([data-theme="dark"]) .dock-item.active { color: var(--ink); background: rgba(20,20,20,0.06); }
+html:not([data-theme="dark"]) .dock-item i { color: var(--ink-50); }
+html:not([data-theme="dark"]) .mono-chip { color: var(--ink-70); border-color: rgba(20,20,20,0.25); }
+html:not([data-theme="dark"]) .mono-chip.on { color: #fff; background: var(--accent); border-color: var(--accent-ink); }
+html:not([data-theme="dark"]) .solsys-hint { color: var(--ink-50); }
+html:not([data-theme="dark"]) .solsys-label { color: var(--ink-70); }
+html:not([data-theme="dark"]) .ra-dec { color: var(--ink-70); }
+html:not([data-theme="dark"]) .ra-dec .ra-dec-live { color: var(--accent-ink); }
+
+/* planet drawer: glass editorial card matching the theme, both modes */
+.planet-drawer {
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+html[data-theme="dark"] .planet-drawer {
+  background: linear-gradient(180deg, rgba(14, 19, 32, 0.92), rgba(8, 12, 24, 0.88));
+  border-color: rgba(205, 214, 255, 0.18);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(205, 214, 255, 0.05);
+}
+html[data-theme="dark"] .planet-drawer::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent), rgba(139, 92, 246, 0.65), transparent);
+  border-radius: 12px 12px 0 0;
+}
+html:not([data-theme="dark"]) .planet-drawer {
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.94), rgba(250, 247, 242, 0.9));
+  border-color: rgba(20, 20, 20, 0.24);
+  box-shadow: 0 24px 70px rgba(20, 20, 20, 0.2);
+}
+.planet-drawer .drawer-head { margin-bottom: 4px; }
+.planet-drawer h2 { letter-spacing: -0.01em; }
+.planet-drawer .nasa-grid { margin: 12px 0; border-radius: 8px; overflow: hidden; }
+.planet-drawer .nasa-grid .k { font-size: 9px; }
+.planet-drawer .nasa-grid .v { font-size: 14px; font-weight: 600; }
+.planet-drawer .stamp { text-transform: uppercase; }
+
+/* moons list as mini-cards */
+.solsys-moons { border-top: 1px dotted var(--line); }
+.solsys-moon-row { padding: 6px 0; }
+.solsys-moon-row b { color: var(--ink); }
+
+/* ── responsive: phones and tablets ── */
+@media (max-width: 900px) {
+  .solsys-hero {
+    left: 12px; right: 12px; width: auto; top: auto; bottom: 86px;
+    transform: none; padding: 18px 18px;
+  }
+  .solsys-hero.hero-hidden { transform: translateY(14px); }
+  .solsys-hero h1 { font-size: 40px; }
+  .solsys-hero .hero-lead { font-size: 13px; }
+  .planet-drawer {
+    left: 12px; right: 12px; top: auto; bottom: 74px; transform: none;
+    width: auto; max-height: 58vh;
+  }
+  @keyframes drawer-in { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  .cosmos-topbar { top: 64px; padding: 0 12px; }
+  .planet-dock { bottom: 10px; max-width: calc(100vw - 16px); }
+  .ra-dec { display: none; }
+}
+@media (max-width: 540px) {
+  .dock-item b { font-size: 10px; }
+  .dock-item { padding: 5px 7px; gap: 5px; }
+  .planet-dock { gap: 2px; padding: 5px; }
+  .solsys-hero { bottom: 72px; }
+}
+
+/* fusion grid (sun drawer) + sol dot */
+.dot-sol { background: radial-gradient(circle at 35% 35%, #fff3d6, #ff9a45 70%); box-shadow: 0 0 8px rgba(255, 170, 90, 0.8); }
+.fusion-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+.fusion-cell {
+  display: flex; flex-direction: column; gap: 2px; padding: 9px 10px;
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  text-decoration: none; color: var(--ink-70); background: var(--paper-raised);
+}
+.fusion-cell:hover { border-color: var(--accent); color: var(--ink); }
+.fusion-cell b { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; display: flex; align-items: center; gap: 6px; }
+.fusion-cell i { font-style: normal; font-size: 10px; color: var(--ink-50); line-height: 1.35; }

@@ -15,7 +15,7 @@ import time
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.config import settings
 from app.core import engine
@@ -28,6 +28,22 @@ from app.shared.bus import publish
 logger = logging.getLogger("pulse.detector")
 
 _loop_task: asyncio.Task | None = None
+
+
+async def _self_series_has_open_fault(db, tenant_id: str, service: str) -> bool:
+    """True when a chaos fault is live on the self-observation series (MTTD demo)."""
+    fault = (
+        await db.execute(
+            select(FaultInjection.id)
+            .where(
+                FaultInjection.tenant_id == tenant_id,
+                FaultInjection.service == service,
+                FaultInjection.detected_at.is_(None),
+            )
+            .limit(1)
+        )
+    ).first()
+    return fault is not None
 
 
 async def detect_once(tenant_id: str) -> list[Anomaly]:
@@ -44,7 +60,16 @@ async def detect_once(tenant_id: str) -> list[Anomaly]:
         ).all()
         services = sorted({r[0] for r in rows})
 
+        # The platform's own live series (astraea-api) must not page MEDIC on its
+        # own traffic bursts — that feedback loop (anomaly → run → LLM calls →
+        # more traffic → more anomalies) generated 5.8k parked runs and 671MB of
+        # events in one audit day. The self-series only pages when a chaos fault
+        # is actually injected on it (the MTTD benchmark demo).
+        from app.pulse.live import SERVICE as SELF_SERVICE
+
         for service in services:
+            if service == SELF_SERVICE and not await _self_series_has_open_fault(db, tenant_id, service):
+                continue
             window = await store.window(tenant_id, service, limit=120)
             if len(window) < 40:
                 continue  # not enough live history to have learned a baseline yet
@@ -72,8 +97,17 @@ async def detect_once(tenant_id: str) -> list[Anomaly]:
             drifted = max(zscores.items(), key=lambda kv: abs(kv[1]))
             significant = abs(drifted[1]) >= settings.anomaly_drift_sigma
 
+            # A constant-emitting service (zero-variance baseline) gives the forest
+            # nothing to rank — it scores every point 0.0 and votes "inlier" even
+            # for a massive drift. There the z-score against the service's OWN
+            # flatlined history is the detector: any deviation is the signal.
+            degenerate = bool((baseline.std(axis=0) < 1e-9).any())
+            if degenerate:
+                is_outlier = significant
+
             if not (is_outlier and significant and score < 0):
-                continue
+                if not (degenerate and significant):
+                    continue
 
             state = (
                 await db.execute(
@@ -135,10 +169,25 @@ async def detect_once(tenant_id: str) -> list[Anomaly]:
 
             await db.commit()
             await db.refresh(anomaly)
-            anomalies.append(anomaly)
 
-            run_id = await _create_medic_run(db, anomaly)
-            await db.commit()
+            # Every persisted anomaly must carry its run: if the workflow fails to
+            # build, remove the orphan instead of leaving a runless incident behind.
+            try:
+                run_id = await _create_medic_run(db, anomaly)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.exception("detector: MEDIC run spawn failed — removing orphan anomaly %s",
+                                 anomaly.id)
+                try:
+                    async with SessionLocal() as cleanup:
+                        await cleanup.execute(delete(Anomaly).where(Anomaly.id == anomaly.id))
+                        await cleanup.commit()
+                except Exception:  # noqa: BLE001 — cleanup is best-effort
+                    logger.exception("detector: orphan anomaly cleanup failed")
+                continue
+
+            anomalies.append(anomaly)
 
             await publish(f"pulse:{tenant_id}", {
                 "kind": "anomaly", "anomaly_id": anomaly.id, "service": service,

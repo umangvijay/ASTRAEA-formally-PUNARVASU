@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import difflib
 import json
+import logging
 import re
 import time
 
@@ -25,6 +26,8 @@ from app.config import settings
 from app.demo.services import DEFAULT_CONFIGS, _config_path, load_config, write_config
 from app.pulse.models import Anomaly
 from app.pulse.store import get_store
+
+logger = logging.getLogger("medic.tools")
 
 METRIC_TO_KIND = {
     "error_rate": "error_storm",
@@ -98,11 +101,12 @@ async def _rank_by_evidence(db: AsyncSession, run, triage: dict) -> list[dict]:
     services = sorted({r[0] for r in (await db.execute(
         select(MetricPoint.service).where(MetricPoint.tenant_id == run.tenant_id)
         .group_by(MetricPoint.service))).all()})
-    suspect = triage["service"]
-    drifted = triage["evidence"]["drifted"]
-    sigma = abs(float(triage["evidence"]["drift_sigma"]))
+    suspect = triage.get("service", "")
+    evidence = triage.get("evidence") or {}
+    drifted = evidence.get("drifted", "unknown")
+    sigma = abs(float(evidence.get("drift_sigma") or 0))
     kind = METRIC_TO_KIND.get(drifted, "unknown_anomaly")
-    if "pool exhausted" in json.dumps(triage["evidence"].get("recent_logs", [])).lower():
+    if "pool exhausted" in json.dumps(evidence.get("recent_logs", [])).lower():
         kind = "config_drift"
     ranked = [{
         "service": suspect, "kind": kind,
@@ -117,8 +121,10 @@ async def _rank_by_evidence(db: AsyncSession, run, triage: dict) -> list[dict]:
 
 
 async def _investigate(db: AsyncSession, run, args: dict) -> dict:
-    triage = json.loads(args.get("triage", "{}"))
-    service = triage["service"]
+    triage = json.loads(args.get("triage", "{}") or "{}")
+    if not isinstance(triage, dict):
+        triage = {}
+    service = triage.get("service") or "unknown"
     store = get_store(db)
 
     configs = {svc: load_config(svc) for svc in settings.demo_services}
@@ -155,10 +161,18 @@ Rank by likelihood, most likely first (max 3)."""
     parsed = None
     provider_note = "evidence-ranked (statistical fallback)"
     try:
+        import asyncio as _asyncio
+
         from app.sentinel.llm import complete
 
-        out = await complete(db, run.tenant_id, messages, model=None,
-                             origin_module="medic", run_id=run.id)
+        # Bounded enrichment: the statistical ranking below is already correct;
+        # the LLM only refines it, so a stalled provider can never park an
+        # SRE page past this budget.
+        out = await _asyncio.wait_for(
+            complete(db, run.tenant_id, messages, model=None,
+                     origin_module="medic", run_id=run.id),
+            timeout=settings.medic_enrich_timeout_s,
+        )
         parsed = _parse_json(out["content"])
         provider_note = f"llm:{out['provider']}:{out['model']}"
     except Exception:  # noqa: BLE001 — fallback path is part of the design
@@ -186,33 +200,41 @@ Rank by likelihood, most likely first (max 3)."""
 
 
 async def _reproduce(args: dict) -> dict:
-    investigation = json.loads(args.get("investigation", "{}"))
+    investigation = json.loads(args.get("investigation", "{}") or "{}")
     top = (investigation.get("hypotheses") or [{}])[0]
     service, kind = top.get("service", ""), top.get("kind", "")
     port = settings.demo_services.get(service)
     if not port:
-        # Live control-plane series (Cloud Run / no demo sidecars).
+        # No demo sidecar for this service: there is nothing to reproduce in.
+        # The live telemetry itself is the evidence — say so honestly instead
+        # of fabricating a verification the gate would trust.
         return {"content": json.dumps({
-            "verified": True,
+            "verified": False,
             "service": service,
             "kind": kind,
             "service_mode": "live-platform",
-            "details": f"reproduced against live {service} telemetry (no demo sidecar)",
+            "details": f"no sandbox sidecar for {service} — reproduction not possible; "
+                       "the live telemetry (drift evidence) is the only signal",
         })}
     try:
         async with httpx.AsyncClient(timeout=4) as client:
-            diag = (await client.get(f"http://127.0.0.1:{port}/diagnose")).json()
-    except httpx.HTTPError as exc:
+            resp = await client.get(f"http://127.0.0.1:{port}/diagnose")
+            resp.raise_for_status()
+            diag = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
         return {"content": json.dumps({"verified": False,
-                "details": f"service unreachable: {exc}"})}
+                "details": f"service unreachable or /diagnose unreadable: {exc}"})}
+    if not isinstance(diag, dict):
+        return {"content": json.dumps({"verified": False,
+                "details": "service /diagnose returned an unexpected shape"})}
 
     verified = False
-    if diag["mode"] != "healthy":
-        verified = kind in (diag["mode"], "unknown_anomaly")
-    if diag["config"].get("pool_size", 99) <= 2:
+    if diag.get("mode") != "healthy":
+        verified = kind in (diag.get("mode"), "unknown_anomaly")
+    if (diag.get("config") or {}).get("pool_size", 99) <= 2:
         verified = verified or kind == "config_drift"
     return {"content": json.dumps({"verified": verified, "service": service,
-            "kind": kind, "service_mode": diag["mode"], "config": diag["config"],
+            "kind": kind, "service_mode": diag.get("mode"), "config": diag.get("config"),
             "details": "service state matches hypothesis" if verified else
                        "state does not match hypothesis (may have auto-recovered)"})}
 
@@ -222,15 +244,22 @@ async def _patch(db: AsyncSession, run, args: dict) -> dict:
     top = (investigation.get("hypotheses") or [{}])[0]
     service, kind = top.get("service", ""), top.get("kind", "")
     if service not in settings.demo_services:
-        patch_dir = settings.data_dir / "patches"
-        patch_dir.mkdir(parents=True, exist_ok=True)
-        patch_file = patch_dir / f"run_{run.id[:8]}_{service}.json"
+        # No sandbox to apply a fix in. Record a RECOMMENDATION — honestly
+        # labelled, never "applied": no live mitigation happened here.
+        from app.shared import artifacts
+
         body = {
             "service": service, "kind": kind, "run_id": run.id,
-            "mitigation": "SLO circuit-breaker / rollback recorded for the live control plane",
+            "applied": False,
+            "mitigation": "recommendation only — no live mitigation was applied; "
+                          "rollback/circuit-breaker decisions belong to a human operator",
+            "recommendation": f"review {kind} on {service} against its SLO; "
+                              "roll back or shed load if the drift persists",
         }
-        patch_file.write_text(json.dumps(body, indent=2) + "\n")
-        return {"content": json.dumps({"applied": True, "path": str(patch_file),
+        ref = artifacts.write_text(f"medic/run_{run.id[:8]}_{service}.json",
+                                   json.dumps(body, indent=2) + "\n")
+        return {"content": json.dumps({"applied": False, "path": ref,
+                                       "artifact_backend": artifacts.backend_name(),
                                        "github": None, **body}, default=str)}
     cfg_path = _config_path(service)
     before = cfg_path.read_text() if cfg_path.exists() else ""
@@ -249,10 +278,15 @@ async def _patch(db: AsyncSession, run, args: dict) -> dict:
     ))
     write_config(service, fixed)  # apply — the gate approved this
 
-    patch_dir = settings.data_dir / "patches"
-    patch_dir.mkdir(parents=True, exist_ok=True)
-    patch_file = patch_dir / f"run_{run.id[:8]}_{service}.patch"
-    patch_file.write_text(diff)
+    from app.shared import artifacts
+
+    patch_file = artifacts.write_text(f"medic/run_{run.id[:8]}_{service}.patch", diff)
+    if settings.artifact_bucket:
+        # keep a local copy too when the durable backend is remote — operators
+        # expect data/patches to hold recent diffs on any machine
+        local = settings.data_dir / "patches" / f"run_{run.id[:8]}_{service}.patch"
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text(diff)
 
     pr_url = None
     if settings.github_token and settings.github_repo:
@@ -290,8 +324,12 @@ async def _open_github_pr(service: str, diff: str, goal: str) -> str | None:
             base_sha = (ref.get("object") or {}).get("sha")
             if not base_sha:
                 return None
-            await client.post(f"https://api.github.com/repos/{repo}/git/refs",
-                              json={"ref": f"refs/heads/{branch}", "sha": base_sha})
+            ref_resp = await client.post(
+                f"https://api.github.com/repos/{repo}/git/refs",
+                json={"ref": f"refs/heads/{branch}", "sha": base_sha})
+            # a silently failed branch would make the contents PUT and the PR
+            # fail with confusing 404s — surface it like every other step
+            ref_resp.raise_for_status()
             content = (_config_path(service)).read_text()
             await client.put(
                 f"https://api.github.com/repos/{repo}/contents/{service}/config.json",
@@ -304,5 +342,6 @@ async def _open_github_pr(service: str, diff: str, goal: str) -> str | None:
                       "base": sha, "body": f"auto-generated fix\n\n```diff\n{diff}\n```"})
             pr_resp.raise_for_status()
             return pr_resp.json().get("html_url")
-    except (httpx.HTTPError, KeyError, ValueError):
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        logger.warning("medic: GitHub PR failed for %s: %s", service, exc)
         return None

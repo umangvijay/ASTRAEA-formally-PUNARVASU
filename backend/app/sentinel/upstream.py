@@ -19,9 +19,44 @@ import httpx
 
 from app.config import settings
 
+logger = logging.getLogger("sentinel.upstream")
+
 
 class ProviderUnavailable(Exception):
     pass
+
+
+# ── provider circuit breaker (self-healing chain) ────────────────────────────
+# Real outcomes (success/failure of every attempt, see llm.complete) feed a
+# per-provider breaker: after repeated consecutive failures a provider is
+# benched for a cooldown instead of stalling every call, then given one fresh
+# attempt (half-open). A success closes the breaker immediately. Nothing is
+# configured by hand — the chain heals itself from live behavior.
+_BREAKER_THRESHOLD = 2
+_BREAKER_COOLDOWN_S = 60.0
+_breaker: dict[str, dict] = {}
+
+
+def note_provider_outcome(provider: str, ok: bool) -> None:
+    """Record one real provider outcome into the circuit breaker."""
+    import time as _t
+
+    state = _breaker.setdefault(provider, {"fails": 0, "open_until": 0.0})
+    if ok:
+        state["fails"] = 0
+        state["open_until"] = 0.0
+        return
+    state["fails"] += 1
+    if state["fails"] >= _BREAKER_THRESHOLD:
+        state["open_until"] = _t.monotonic() + _BREAKER_COOLDOWN_S
+        state["fails"] = 0  # half-open: after the cooldown it gets one fresh try
+
+
+def _breaker_open(provider: str) -> bool:
+    import time as _t
+
+    state = _breaker.get(provider)
+    return bool(state) and _t.monotonic() < state["open_until"]
 
 
 _ollama_probe: tuple[float, bool] | None = None  # (timestamp, reachable) — 60s cache
@@ -163,6 +198,8 @@ def _provider_ready(provider: str) -> bool:
 def pick_provider(model: str | None) -> tuple[str, str]:
     """Returns (provider, model). Model name hints route to a provider; else first ready in order."""
     model = model or ""
+    if model and model.strip().lower() in ("auto", "default", "none", "null"):
+        model = ""  # "auto" means "no hint" — let the provider chain decide
     hint = None
     if model.startswith("vertex"):
         hint = "vertex"
@@ -179,19 +216,61 @@ def pick_provider(model: str | None) -> tuple[str, str]:
     if hint and hint in order and _provider_ready(hint):
         return hint, _default_model(hint, model)
 
-    # SQL / on-device specialists are never the general-chat fallback — they
-    # hallucinate tools and "research". Hint pvu-sql / model_forge to use them.
+    # Walk the configured order (cloud first, local last) — a local base model
+    # present on disk must never preempt a ready cloud provider. Breaker-open
+    # providers (recently failing) go last; if every ready provider is benched,
+    # try them anyway rather than refusing the call.
     specialty = {"model_forge", "mlx_local"}
-    for provider in order:
-        if provider in specialty and hint != provider:
-            continue
-        if _provider_ready(provider):
+    allow_local = settings.allow_local_chat
+
+    def _eligible(providers: list[str], *, honor_breaker: bool) -> tuple[str, str] | None:
+        for provider in providers:
+            if provider in specialty and hint != provider:
+                if provider == "model_forge":
+                    continue  # the SQL champion is only reachable via an explicit hint
+                if not allow_local:
+                    continue  # on-device base serves only when explicitly allowed
+            if not _provider_ready(provider):
+                continue
+            if honor_breaker and _breaker_open(provider):
+                continue
             return provider, _default_model(provider, model)
+        return None
+
+    picked = _eligible(order, honor_breaker=True) or _eligible(order, honor_breaker=False)
+    if picked:
+        return picked
     raise ProviderUnavailable(
         "no general LLM provider configured — set ASTRAEA_VERTEX_PROJECT (GCloud), "
         "GEMINI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY, or run Ollama locally "
         "(the SQL champion is only used when you ask for pvu-sql / model_forge)"
     )
+
+
+def next_ready_provider(failed: list[str], model: str | None) -> tuple[str, str] | None:
+    """The next ready provider after `failed` ones — graceful degradation chain.
+
+    Every cloud model must have a local fallback route (Spec §4); a quota-stalled
+    or dead provider hands the call to the next in the configured order instead of
+    failing the run."""
+    model = model or ""
+    if model.strip().lower() in ("auto", "default", "none", "null"):
+        model = ""  # same normalization as pick_provider — "auto" is no hint
+    for provider in settings.provider_order:
+        if provider in failed:
+            continue
+        if provider in ("model_forge", "mlx_local") and model and \
+                model not in ("pvu-sql", "model_forge"):
+            continue  # specialty models only on explicit hint here
+        if provider == "model_forge":
+            continue  # champion never serves general chat as a fallback
+        if provider == "mlx_local" and not settings.allow_local_chat:
+            continue
+        if _breaker_open(provider):
+            continue  # benched after repeated real failures — healed provider first
+        if _provider_ready(provider):
+            return provider, _default_model(provider, model)
+    return None
 
 
 def _default_model(provider: str, model: str) -> str:
@@ -202,7 +281,9 @@ def _default_model(provider: str, model: str) -> str:
         "gemini": settings.gemini_default_model,
         "anthropic": settings.anthropic_default_model,
         "groq": settings.groq_default_model,
-        "mlx_local": "qwen2.5-0.5b-mlx",
+        # Label only — generate_base() serves the on-device base snapshot; the
+        # name follows the configured general model (nothing hardcoded §4.1).
+        "mlx_local": settings.ollama_default_model,
         "model_forge": "pvu-sql-champion",
         "ollama": settings.ollama_default_model,
     }[provider]
@@ -275,33 +356,62 @@ async def stream_chat(
                     cfg = _gemini_tool_config(tool_choice)
                     if cfg:
                         body["toolConfig"] = cfg
-                url, headers = _gemini_or_vertex_url(provider, model)
-                calls: list[dict] = []
-                async with client.stream("POST", url, json=body, headers=headers) as resp:
-                    if resp.status_code != 200:
-                        detail = (await resp.aread()).decode()[:300]
-                        raise ProviderUnavailable(f"{provider} {resp.status_code}: {detail}")
-                    async for payload in _iter_sse(resp.aiter_lines()):
-                        for ev in _from_gemini(payload, calls):
+
+                async def _gemini_once(model_name: str) -> AsyncIterator[dict]:
+                    calls_local: list[dict] = []
+                    url, headers = _gemini_or_vertex_url(provider, model_name)
+                    async with client.stream("POST", url, json=body, headers=headers) as resp:
+                        if resp.status_code != 200:
+                            detail = (await resp.aread()).decode()[:300]
+                            raise ProviderUnavailable(f"{provider} {resp.status_code}: {detail}")
+                        async for payload in _iter_sse(resp.aiter_lines()):
+                            for ev in _from_gemini(payload, calls_local):
+                                yield ev
+                    if calls_local:
+                        yield {"type": "tool_calls", "tool_calls": calls_local}
+
+                # 429 (quota exhausted) → retry configured sibling models, each with
+                # its own rate-limit bucket; anything else surfaces immediately.
+                models_to_try = [model]
+                if provider == "gemini" and model == settings.gemini_default_model:
+                    models_to_try += [m.strip() for m in settings.gemini_fallback_models.split(",")
+                                      if m.strip()]
+                last_exc: ProviderUnavailable | None = None
+                for model_name in models_to_try:
+                    try:
+                        async for ev in _gemini_once(model_name):
                             yield ev
-                if calls:
-                    yield {"type": "tool_calls", "tool_calls": calls}
+                        last_exc = None
+                        break
+                    except ProviderUnavailable as exc:
+                        if "429" not in str(exc):
+                            raise
+                        last_exc = exc
+                if last_exc is not None:
+                    raise last_exc
             elif provider == "anthropic":
                 async for ev in _stream_anthropic(client, model, messages, temperature, max_tokens, tools):
                     yield ev
             elif provider == "mlx_local":
+                import asyncio as _asyncio
+
                 from app.model_forge.serving import generate_base
 
-                text = generate_base(messages, max_tokens=max_tokens)
+                # MLX inference is sync and GIL-holding — off the event loop or it
+                # freezes every concurrent request, SSE stream and run heartbeat.
+                text = await _asyncio.to_thread(generate_base, messages, max_tokens)
                 if text:
                     yield {"type": "text", "text": text}
             elif provider == "model_forge":
+                import asyncio as _asyncio
+
                 from app.model_forge.serving import generate as forge_generate
 
-                text = forge_generate(
+                text = await _asyncio.to_thread(
+                    forge_generate,
                     "\n".join(str(m.get("content", "")) for m in messages),
-                    model_path=settings.forge_model_path or None,
-                    max_tokens=max_tokens)
+                    settings.forge_model_path or None,
+                    max_tokens)
                 if text:
                     yield {"type": "text", "text": text}
             else:  # groq / ollama — OpenAI-compatible
@@ -407,23 +517,49 @@ async def _iter_sse(lines: AsyncIterator[str]) -> AsyncIterator[dict]:
             continue
 
 
+def vertex_location_for_model(model: str) -> str:
+    """Gemini 3.x publisher models are served on the global Vertex endpoint.
+
+    Regional hosts (`us-central1-aiplatform.googleapis.com`) 404 those IDs.
+    Gemini 2.5 and older stay on ASTRAEA_VERTEX_LOCATION (default us-central1).
+    """
+    loc = (settings.vertex_location or "us-central1").strip() or "us-central1"
+    name = (model or "").removeprefix("vertex/")
+    if name.startswith("gemini-3") and loc.lower() != "global":
+        return "global"
+    return loc
+
+
+def vertex_generate_url(model: str, *, stream: bool = True) -> tuple[str, dict]:
+    """(url, headers) for Vertex generateContent / streamGenerateContent."""
+    proj = settings.vertex_project
+    name = (model or settings.vertex_default_model).removeprefix("vertex/")
+    loc = vertex_location_for_model(name)
+    host = (
+        "https://aiplatform.googleapis.com"
+        if loc.lower() == "global"
+        else f"https://{loc}-aiplatform.googleapis.com"
+    )
+    method = "streamGenerateContent?alt=sse" if stream else "generateContent"
+    url = (
+        f"{host}/v1/projects/{proj}/locations/{loc}"
+        f"/publishers/google/models/{name}:{method}"
+    )
+    token = settings.vertex_access_token or _vertex_adc_token()
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    else:
+        key = settings.vertex_api_key or settings.gemini_api_key
+        if key:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}key={key}"
+    return url, headers
+
+
 def _gemini_or_vertex_url(provider: str, model: str) -> tuple[str, dict]:
     if provider == "vertex":
-        loc, proj = settings.vertex_location, settings.vertex_project
-        model = model.removeprefix("vertex/")
-        host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
-        url = (
-            f"https://{host}/v1/projects/{proj}/locations/{loc}"
-            f"/publishers/google/models/{model}:streamGenerateContent?alt=sse"
-        )
-        token = settings.vertex_access_token or _vertex_adc_token()
-        key = settings.vertex_api_key or (settings.gemini_api_key if not token else "")
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        elif key:
-            url += f"&key={key}"
-        return url, headers
+        return vertex_generate_url(model, stream=True)
     return (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:streamGenerateContent?alt=sse&key={settings.gemini_api_key}",

@@ -19,8 +19,14 @@ class ApiKeyOut(BaseModel):
 
 @router.post("/me/api-key", response_model=ApiKeyOut)
 async def rotate_api_key(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from fastapi import HTTPException
+
     from app.core.models import Tenant
 
+    # rotating the tenant key silently breaks every existing SENTINEL client —
+    # that decision belongs to owners/admins, not to guests or members
+    if user.role not in ("owner", "admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="owner or admin role required")
     tenant = await db.get(Tenant, user.tenant_id)
     key = generate_api_key()
     tenant.api_key_hash = hash_api_key(key)

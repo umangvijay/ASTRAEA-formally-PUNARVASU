@@ -95,7 +95,7 @@ const START: { id: string; x: number; y: number; speed: number; autoSpin: number
   { id: "neptune", x: 10, y: 66, speed: 4.0, autoSpin: 5, draggable: true },
 ];
 
-export function Cosmos() {
+export function Cosmos({ ambient = false }: { ambient?: boolean }) {
   const bodyRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const cometRefs = useRef<(HTMLSpanElement | null)[]>([null, null]);
 
@@ -106,7 +106,9 @@ export function Cosmos() {
     const vw = () => window.innerWidth || 1;
     const vh = () => window.innerHeight || 1;
 
-    for (const spec of START) {
+    // ambient mode: sky, stars, nebulas and comets only — no draggable bodies,
+    // no RAF loop (inner pages keep the home theme without the scene weight)
+    for (const spec of ambient ? [] : START) {
       const el = bodyRefs.current[spec.id];
       if (!el) continue;
       const tex = el.querySelector<HTMLElement>(".cosmos-body-tex");
@@ -272,13 +274,25 @@ export function Cosmos() {
 
   return (
     <>
-      <div className="cosmos" aria-hidden>
+      <div className={`cosmos${ambient ? " cosmos--ambient" : ""}`} aria-hidden>
         <div className="cosmos-sky-wrap">
           <img className="cosmos-sky" src="/cosmos/milkyway.png" alt="" />
+          <span className="cosmos-nebula nebula-rose" />
+          <span className="cosmos-nebula nebula-teal" />
+          <span className="cosmos-galaxy galaxy-andromeda" />
+          <span className="cosmos-galaxy galaxy-pinwheel" />
           <span className="cosmos-stars" />
+          <span className="cosmos-stars stars-far" />
+          <span className="cosmos-stars stars-near" />
           <span className="cosmos-sky-veil" />
+          <div className="cosmos-comets">
+            <span className="comet comet-1" />
+            <span className="comet comet-2" />
+            <span className="comet comet-3" />
+          </div>
         </div>
       </div>
+      {!ambient && (
       <div className="cosmos-bodies" aria-hidden>
         <div ref={setRef("sol")} className="cosmos-body cosmos-sol">
           <span className="cosmos-sol-core" />
@@ -343,6 +357,7 @@ export function Cosmos() {
           <span className="cosmos-comet-head" />
         </span>
       </div>
+      )}
     </>
   );
 }

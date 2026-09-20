@@ -25,9 +25,9 @@ export default function Doc() {
       <PipelineDiagram
         title="GCLOUD PATH"
         stages={[
-          { id: "project", label: "Project", detail: "ASTRAEA_VERTEX_PROJECT + location (default us-central1)." },
-          { id: "auth", label: "Auth", detail: "ADC, ASTRAEA_VERTEX_ACCESS_TOKEN, or ASTRAEA_VERTEX_API_KEY." },
-          { id: "sentinel", label: "Route", detail: "SENTINEL picks vertex when the project is ready — same Gemini models, billed to GCP." },
+          { id: "project", label: "Project", detail: "ASTRAEA_VERTEX_PROJECT + location global for Gemini 3.x." },
+          { id: "auth", label: "Auth", detail: "Cloud Run SA needs roles/aiplatform.user. ADC, access token, or API key." },
+          { id: "sentinel", label: "Route", detail: "SENTINEL picks vertex when ADC actually mints a token — Gemini 3.8 Flash / 3.1 Pro on the global host." },
           { id: "fallback", label: "Offline", detail: "No project? Ollama / MODEL-FORGE / MLX still answer. Never a canned string." },
         ]}
       />

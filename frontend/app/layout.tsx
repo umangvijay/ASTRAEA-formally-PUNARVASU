@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, JetBrains_Mono, Fraunces } from "next/font/google";
-import { Cosmos } from "@/components/Cosmos";
+import { CosmosBackdrop } from "@/components/CosmosBackdrop";
 import "./globals.css";
 
 const display = Space_Grotesk({
@@ -22,7 +22,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Astraea — control plane for autonomous agents",
   description:
-    "One platform, six AI products, one shared brain. AI SRE, computer-use agent, AI SOC analyst, voice AI employee, self-evolving engine and our own model — usable solo or fused.",
+    "Lab control plane for six agents with one SENTINEL brain. AI SRE, computer-use, SOC, voice, self-evolving skills and a SQL model — usable solo or fused.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -37,7 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         `}} />
       </head>
       <body className={`${display.variable} ${serif.variable} ${mono.variable}`}>
-        <Cosmos />
+        <CosmosBackdrop />
         {children}
       </body>
     </html>

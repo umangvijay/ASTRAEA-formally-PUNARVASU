@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+import time as _time
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.sentinel.pipeline import StreamScanner, estimate_tokens, load_rules, meter, scan_messages
@@ -33,20 +35,64 @@ async def complete(
         await meter(db, tenant_id, blocked=True)
         raise BlockedByGuardrail(scan.hits)
 
+    from app.sentinel.upstream import ProviderUnavailable, next_ready_provider, pick_provider
+
     provider, resolved_model = pick_provider(model)
     scanner = StreamScanner(await load_rules(db, tenant_id, "output"))
 
     parts: list[str] = []
+    emitted = False
 
     async def _emit_delta(safe: str) -> None:
+        nonlocal emitted
         parts.append(safe)
+        if safe:
+            emitted = True
         if on_delta and safe:
             await on_delta(safe)
 
-    async for delta in stream_completion(
-        provider, resolved_model, scan.messages, temperature=temperature, max_tokens=max_tokens
-    ):
-        await _emit_delta(scanner.add(delta))
+    # Graceful degradation: a quota-stalled or dead provider hands the call to
+    # the next ready one in the configured order — before any token reached the
+    # console, so the console never sees a duplicated or half-switched stream.
+    # Every attempt is also recorded as an outcome reward (module "llm"):
+    # success rate + latency per provider/model accumulate in the scoreboard
+    # (/api/benchmarks/llm) — the feedback signal FORGE and the operator use.
+    tried: list[str] = [provider]
+
+    async def _reward(prov: str, res_model: str, ok: bool) -> None:
+        from app.sentinel.upstream import note_provider_outcome
+        from app.shared.benchmarks import record as _record
+
+        ms = round((_time.perf_counter() - t0) * 1000, 1)
+        # the circuit breaker reacts in real time; the scoreboard keeps history
+        note_provider_outcome(prov, ok)
+        try:
+            await _record(db, "llm", f"success:{prov}", 1.0 if ok else 0.0,
+                          tenant_id=tenant_id, metadata={"model": res_model})
+            if ok:
+                await _record(db, "llm", f"latency_ms:{prov}", ms,
+                              tenant_id=tenant_id, metadata={"model": res_model})
+        except Exception:  # noqa: BLE001 — telemetry never breaks the call
+            pass
+
+    while True:
+        t0 = _time.perf_counter()
+        try:
+            async for delta in stream_completion(
+                provider, resolved_model, scan.messages, temperature=temperature, max_tokens=max_tokens
+            ):
+                await _emit_delta(scanner.add(delta))
+            await _reward(provider, resolved_model, ok=True)
+            break
+        except ProviderUnavailable:
+            await _reward(provider, resolved_model, ok=False)
+            if emitted:
+                raise
+            nxt = next_ready_provider(tried, model)
+            if nxt is None:
+                raise
+            provider, resolved_model = nxt
+            tried.append(provider)
     await _emit_delta(scanner.flush())
     content = "".join(parts)
 

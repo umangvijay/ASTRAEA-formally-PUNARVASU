@@ -128,17 +128,15 @@ async def release(db: AsyncSession, run_id: str, wid: str | None = None) -> None
 
 
 async def requeue_expired(db: AsyncSession) -> int:
-    """Return lease-expired running runs to the queue. Called by every worker tick."""
+    """Return lease-expired running runs to the queue. Atomic: the lease must
+    STILL be expired at UPDATE time, so a heartbeat that renewed between the
+    scan and the write can never lose its run (no double execution)."""
     now = _now()
-    rows = (await db.execute(
-        select(Run).where(
+    result = await db.execute(
+        update(Run).where(
             Run.status == "running", Run.lease_expires_at.is_not(None),
-            Run.lease_expires_at < now)
-    )).scalars().all()
-    for run in rows:
-        run.status = "queued"
-        run.worker_id = None
-        run.lease_expires_at = None
-    if rows:
-        await db.commit()
-    return len(rows)
+            Run.lease_expires_at < now,
+        ).values(status="queued", worker_id=None, lease_expires_at=None)
+    )
+    await db.commit()
+    return result.rowcount or 0

@@ -22,5 +22,9 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/next.config.mjs ./next.config.mjs
+# never run as root inside the container
+RUN addgroup -S -g 10001 astraea && adduser -S -u 10001 -G astraea astraea \
+    && chown -R astraea:astraea /app
+USER astraea
 EXPOSE 8080
 CMD ["sh", "-c", "npx next start -H 0.0.0.0 -p ${PORT:-8080}"]

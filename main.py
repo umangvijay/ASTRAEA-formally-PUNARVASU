@@ -238,10 +238,17 @@ class ManagedProcess:
             print(f"  {line}")
 
 
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def http_ok(url: str, timeout: float = 2.0) -> bool:
-    """True only if OUR api answers — avoids false positives from other apps on the same port."""
+    """True only if OUR api answers — avoids false positives from other apps on the same port.
+
+    Uses a proxy-free opener: env HTTP_PROXY must never hijack 127.0.0.1 health
+    checks (that made the status line report api:DOWN while uvicorn served fine).
+    """
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with _NO_PROXY_OPENER.open(url, timeout=timeout) as resp:
             if resp.status != 200:
                 return False
             if "/health" in url:
@@ -387,12 +394,23 @@ def main() -> None:
 
     def watch(name: str, proc: ManagedProcess) -> None:
         code = proc.wait()
-        if code is not None and not SHUTDOWN.is_set():
-            print(f"\n{c(f'[{name}] exited with code {code}', '31')}")
-            proc.dump_tail()
-            # Demo bind collisions and a crashed Next must not take the API down.
-            if name == "api":
-                graceful_shutdown(processes, exit_after=True)
+        if code is None or SHUTDOWN.is_set():
+            return
+        print(f"\n{c(f'[{name}] exited with code {code}', '31')}")
+        proc.dump_tail()
+        # Demo bind collisions and a crashed Next must not take the API down.
+        if name == "api":
+            if http_ok(f"http://127.0.0.1:{BACKEND_PORT}/health"):
+                # The process we spawned died but something still serves the API
+                # on our port — it was replaced externally. Killing the console
+                # and demo for that would be wrong; keep watching instead.
+                print(c("  api process was replaced but /health still answers — "
+                        "keeping the platform up.", "33"))
+                return
+            # sys.exit in this daemon thread would NOT stop the launcher — the
+            # main loop would keep printing api:DOWN forever. graceful_shutdown
+            # interrupts the main thread when exit_after is set.
+            graceful_shutdown(processes, exit_after=True)
 
     for name, proc in processes.items():
         threading.Thread(target=watch, args=(name, proc), daemon=True).start()
@@ -439,7 +457,9 @@ def graceful_shutdown(processes: dict[str, ManagedProcess], exit_after: bool = F
             except ProcessLookupError:
                 pass
     if exit_after:
-        sys.exit(1)
+        # The caller may be a daemon thread, where sys.exit() would not stop the
+        # process — interrupt the main loop so the launcher actually exits.
+        os.kill(os.getpid(), signal.SIGINT)
 
 
 if __name__ == "__main__":

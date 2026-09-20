@@ -9,10 +9,13 @@
 
 from __future__ import annotations
 
+import logging
 import random
 import time
 
 from app.core.models import Tenant as _Tenant
+
+logger = logging.getLogger("shield.lab")
 
 # lab topology
 HOSTS = ["web-1", "db-1", "workstation-1", "workstation-2"]
@@ -136,8 +139,9 @@ async def benign_loop() -> None:
                             bytes_out=int(e.get("bytes_out", 0)),
                         ))
                 await db.commit()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 — the lab must never take the API down
+            # but a broken lab that emits nothing must be VISIBLE
+            logger.exception("shield lab benign loop failed")
         await asyncio.sleep(20)
 
 

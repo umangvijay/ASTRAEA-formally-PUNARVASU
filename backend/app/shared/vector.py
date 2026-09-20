@@ -99,7 +99,11 @@ def get_embedder():
             try:
                 from sentence_transformers import SentenceTransformer
 
-                _embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+                # CPU, deliberately: MPS (Metal) init is not thread-safe and
+                # segfaults the process when warmed in a background thread — and
+                # 384-dim embeddings gain nothing meaningful from the GPU.
+                _embedder = SentenceTransformer(
+                    "sentence-transformers/all-MiniLM-L6-v2", device="cpu")
                 _embedder_kind = "minilm"
             except Exception as exc:  # noqa: BLE001 — offline / weights missing
                 logger.warning("MiniLM unavailable (%s) — using hashed embeddings", str(exc)[:80])
@@ -159,8 +163,9 @@ def delete_item(item_id: str) -> None:
 def semantic_search(tenant_id: str, query: str, *, k: int = 5,
                     module: str | None = None,
                     origin_module: str | None = None) -> list[dict[str, Any]]:
-    """Top-k shared-memory hits for one tenant (optionally filtered to items
-    the given module may see — module filter is applied post-hoc on share_with)."""
+    """Top-k shared-memory hits for one tenant. `module` filters post-hoc on the
+    stored share_with metadata (empty share_with = visible to every module) so
+    the low-level layer honors the same visibility contract as the LOOM service."""
     where: dict[str, Any] = {"tenant_id": tenant_id}
     if origin_module:
         where["origin_module"] = origin_module
@@ -175,6 +180,10 @@ def semantic_search(tenant_id: str, query: str, *, k: int = 5,
     for iid, meta, doc, dist in zip(
         res["ids"][0], res["metadatas"][0], res["documents"][0], res["distances"][0]
     ):
+        if module and meta:
+            share_with = {m for m in str(meta.get("share_with") or "").split(",") if m}
+            if share_with and module not in share_with:
+                continue
         hits.append({
             "item_id": iid, "score": round(1.0 - float(dist), 4),
             "metadata": meta, "document": (doc or "")[:400],

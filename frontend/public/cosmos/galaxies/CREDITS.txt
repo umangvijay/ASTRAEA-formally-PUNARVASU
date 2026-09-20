@@ -1,0 +1,8 @@
+Galaxy imagery — public-domain / open data from space agencies:
+
+  andromeda.jpg  — Messier 31, GALEX ultraviolet (NASA/JPL-Caltech)
+  sombrero.jpg   — Messier 104, Hubble Space Telescope (NASA)
+  whirlpool.jpg  — Messier 51, Hubble Space Telescope (NASA/ESA)
+  cartwheel.jpg  — Cartwheel Galaxy, James Webb Space Telescope (NASA/ESA/CSA)
+
+Source: NASA/ESA image archives via Wikimedia Commons.

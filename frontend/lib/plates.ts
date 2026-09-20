@@ -39,7 +39,7 @@ export const PLATES: Plate[] = [
   {
     id: "astraea",
     title: "ASTRAEA · RETURN OF THE LIGHT",
-    caption: "Six products, one brain. Offline, then the same build on Vertex.",
+    caption: "Six lab agents, one SENTINEL brain. Offline, then the same build on Vertex.",
     image: "/cosmos/plate-astraea.png",
     href: "/docs/architecture",
   },

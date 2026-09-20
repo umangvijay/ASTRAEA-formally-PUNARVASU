@@ -4,5 +4,6 @@ steps:
 images:
   - ${_IMAGE}
 substitutions:
-  _IMAGE: gcr.io/${PROJECT_ID}/astraea-console
+  _REGION: us-central1
+  _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/astraea/console:latest
 timeout: 1200s

@@ -63,9 +63,11 @@ export default function Contact() {
           <div className="panel glass span-all">
             {sent ? (
               <div style={{ textAlign: "center", padding: 30 }}>
-                <h3 className="display">Message sent ✓</h3>
+                <h3 className="display">Message received</h3>
                 <p style={{ color: "var(--ink-70)", fontSize: 14 }}>
-                  We&apos;ll reply to <a href="mailto:astraea.agent@gmail.com" style={{ color: "var(--accent)" }}>astraea.agent@gmail.com</a> shortly.
+                  Stored in the control plane for the founder. This Cloud Run
+                  service does not send email. If it is urgent, write{" "}
+                  <a href="mailto:umangvijay35@gmail.com" style={{ color: "var(--accent)" }}>umangvijay35@gmail.com</a>.
                 </p>
                 <button className="btn btn--ghost" onClick={() => { setSent(false); setMessage(""); }}>Send another</button>
               </div>

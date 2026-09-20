@@ -173,3 +173,24 @@ async def _run(run_id: str):
 
     async with SessionLocal() as db:
         return await db.get(Run, run_id)
+
+
+async def test_task_rejects_invalid_url_at_the_edge(client, auth_headers):
+    """Audit MEDIUM: url:"not-a-url" used to return 201 and die later inside
+    Playwright ("Cannot navigate to invalid URL"). Fail fast at validation."""
+    resp = await client.post("/api/operator/task", headers=auth_headers,
+                             json={"goal": "probe the page", "url": "not-a-url"})
+    assert resp.status_code == 422
+    assert not resp.json().get("run_id")  # no run was ever created
+
+
+async def test_task_rejects_private_hosts_at_the_edge(client, auth_headers):
+    """Live-audit finding: the Playwright path navigated into 127.0.0.1 — the
+    SSRF guard covered only web.fetch. Both the edge and the runner now enforce
+    the private-network block."""
+    for url in ("http://127.0.0.1:9000/health", "http://169.254.169.254/latest/meta-data",
+                "http://192.168.1.10/admin"):
+        resp = await client.post("/api/operator/task", headers=auth_headers,
+                                 json={"goal": "probe ssrf", "url": url})
+        assert resp.status_code == 422, f"{url} → {resp.status_code}"
+        assert not resp.json().get("run_id")

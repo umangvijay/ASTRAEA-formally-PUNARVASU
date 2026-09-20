@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     vertex_location: str = "global"
     vertex_access_token: str = ""
     vertex_api_key: str = ""
+    # Chat default. Gemini 3.x publisher models use the global Vertex endpoint
+    # (see sentinel.upstream.vertex_generate_url). Override with
+    # ASTRAEA_VERTEX_DEFAULT_MODEL=gemini-3.1-pro-preview for Pro.
     vertex_default_model: str = "gemini-3.8-flash"
     # Anthropic Claude (optional)
     anthropic_api_key: str = ""
@@ -78,8 +81,17 @@ class Settings(BaseSettings):
     brave_api_key: str = ""
     # General-chat quality first; the SQL champion is only routed to by explicit
     # model hint ("pvu-sql"/"model_forge") — never as the default brain.
-    llm_provider_order: str = "vertex"
-    gemini_default_model: str = "gemini-3.8-flash"
+    llm_provider_order: str = "vertex,gemini,anthropic,groq,ollama,model_forge,mlx_local"
+    # let the on-device base model serve general chat when no cloud key is set
+    # (keeps every feature genuinely working on a keyless dev machine)
+    allow_local_chat: bool = True
+    # "flash-latest" is a Google-maintained alias — never ages out the way pinned
+    # snapshots do (gemini-2.5-flash went 404 for new accounts in 2026).
+    gemini_default_model: str = "gemini-flash-latest"
+    # Free tier is 20 req/min per model; when the primary bucket is exhausted
+    # (429 RESOURCE_EXHAUSTED) SENTINEL retries these siblings — separate quota
+    # buckets — before degrading to the next provider in the chain.
+    gemini_fallback_models: str = "gemini-flash-lite-latest"
     groq_default_model: str = "llama-3.3-70b-versatile"
     ollama_default_model: str = "llama3.2"
     llm_timeout_seconds: int = 60
@@ -102,6 +114,10 @@ class Settings(BaseSettings):
     # ── Pulse (telemetry) + Medic ──
     clickhouse_url: str = ""  # e.g. http://127.0.0.1:8123 — sqlite telemetry store when empty
     detector_interval_seconds: int = 10
+    # MEDIC asks the LLM to re-rank hypotheses on top of the statistical ranking;
+    # an SRE page must never wait on a stalled provider — the evidence-ranked
+    # fallback answers when this budget expires.
+    medic_enrich_timeout_s: float = 10.0
     anomaly_cooldown_seconds: int = 15
     anomaly_drift_sigma: float = 2.5  # learned-baseline z-score gate (DB-editable rule comes with the rules editor)
     chaos_auto_recover_seconds: int = 90
@@ -109,6 +125,9 @@ class Settings(BaseSettings):
     demo_service_base_port: int = 9101
     github_token: str = ""  # optional: real PRs; otherwise patches go to LOOM
     github_repo: str = ""   # e.g. umangvijay/astraea-demo
+    # durable artifact backend: set to a GCS bucket on Cloud Run so patches and
+    # forge champion state survive instance death (local FS under data/artifacts otherwise)
+    artifact_bucket: str = ""
 
     # ── Shield ──
     shield_detector_interval_seconds: int = 5
@@ -142,6 +161,10 @@ class Settings(BaseSettings):
     forge_train_size: int = 220         # generated training pairs
     forge_eval_size: int = 15
     forge_consolidator_interval_s: int = 86400  # nightly in production; tests override
+    # the consolidator asks the LLM to author an improved prompt from mined failures;
+    # a stalled provider must never park the nightly cycle — the deterministic
+    # hardening variant answers when this budget expires.
+    forge_variant_timeout_s: float = 30.0
 
     # ── Operator ──
     operator_parser: str = "dom"  # dom (zero-dep grounding) | omniparser (needs weights)
@@ -149,11 +172,34 @@ class Settings(BaseSettings):
     operator_action_timeout_s: int = 12
     operator_vlm: str = "auto"    # auto: gemini -> ollama -> heuristic planner
 
+    # ── Run engine ──
+    llm_step_timeout_s: int = 90  # a stalled provider must fail the step, not pin the run
+
+    # ── Chaos lab ──
+    # Fault injection distorts the platform's own telemetry series. Off in
+    # production unless explicitly enabled — a tenant must never be able to
+    # bend the real MTTD/error story.
+    chaos_enabled: bool = False
+
     # ── Sentinel ──
     sentinel_overhead_target_ms: int = 120  # displayed target, measured per request
-    sentinel_onnx_threshold: float = 0.85
+    sentinel_onnx_threshold: float = 0.85          # soft: suspicious — corroborate before blocking
+    sentinel_onnx_block_threshold: float = 0.95    # hard: block on this layer alone
     sentinel_similarity_threshold: float = 0.82
+    sentinel_max_scan_chars: int = 64_000          # ML layers see at most this much text
+    sentinel_max_body_bytes: int = 1_000_000       # /v1/chat/completions request-body cap
     tenant_monthly_token_quota: int = 2_000_000
+
+    # ── Retention (bounded self-observation: tables must not grow unbounded) ──
+    retention_enabled: bool = True
+    retention_interval_seconds: int = 3600
+    retention_metric_days: int = 7          # metric_points / log_records
+    retention_anomaly_days: int = 14        # anomalies (MEDIC incidents)
+    retention_security_days: int = 14       # shield security_events + sentinel guardrail_events
+    retention_run_event_days: int = 14      # run_events of terminal runs
+    retention_approval_days: int = 7        # awaiting_approval runs older than this auto-fail
+    retention_batch_size: int = 10_000
+    retention_max_rows_per_sweep: int = 400_000
 
     @property
     def demo_services(self) -> dict[str, int]:

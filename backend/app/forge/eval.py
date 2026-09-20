@@ -118,6 +118,93 @@ async def propose_candidate(db: AsyncSession, *, source: str, kind: str, reason:
     return cand
 
 
+AUTHORING_INSTRUCTION = (
+    "You improve a text-to-SQL prompt template. Keep the placeholders {schema} and "
+    "{question} exactly as written. Reply with the new template ONLY, no prose."
+)
+
+
+def _hardened_variant(champion_template: str, mining: dict) -> str:
+    """Deterministic fallback variant: bolt failure-derived guidance onto the
+    champion template. Both placeholders are inherited, so eval can always run."""
+    lines = [champion_template.rstrip(), "",
+             "Hard-won operational guidance from real production failures:"]
+    for p in mining["proposals"][:3]:
+        lines.append(f"- {p['change']['suggestion']}")
+    lines.append("- Prefer simple, executable SQLite; select only the columns asked for.")
+    return "\n".join(lines)
+
+
+async def _author_variant(db: AsyncSession, champion_template: str, mining: dict) -> tuple[str, str]:
+    """Author a NEW candidate template from the mined failures — the step the
+    nightly loop used to skip (it re-evaluated the unchanged champion).
+
+    The LLM drafts the variant when a provider is up (bounded by
+    forge_variant_timeout_s); otherwise the deterministic hardened variant answers.
+    Returns (template, origin_note) — the template always carries both placeholders."""
+    import asyncio as _asyncio
+
+    evidence = json.dumps(
+        [{"cluster": p["cluster"], "occurrences": p["occurrences"],
+          "sample_error": p["sample_error"], "suggestion": p["change"]["suggestion"]}
+         for p in mining["proposals"][:3]], default=str)
+    prompt = (f"{AUTHORING_INSTRUCTION}\n\nCurrent template:\n{champion_template}\n\n"
+              f"Recurring failures this template must defend against:\n{evidence}")
+    try:
+        from app.sentinel.llm import complete
+
+        out = await _asyncio.wait_for(
+            complete(db, "system", [{"role": "user", "content": prompt}],
+                     origin_module="forge"),
+            timeout=settings.forge_variant_timeout_s,
+        )
+        template = (out["content"] or "").strip().strip("`").strip()
+        if "{schema}" in template and "{question}" in template:
+            return template, f"llm-authored:{out['provider']}:{out['model']}"
+        note = "llm output lost a placeholder — deterministic fallback"
+    except Exception:  # noqa: BLE001 — nightly self-evolution must never hinge on a provider
+        note = "provider unavailable — deterministic fallback"
+    return _hardened_variant(champion_template, mining), note
+
+
+async def consolidate_once(db: AsyncSession) -> dict | None:
+    """One full self-evolution cycle: mine real run failures → author a candidate
+    variant from them → evaluate on the verifiable suite → promote only on
+    measured improvement.
+
+    Runs nightly (the consolidator heartbeat) and on demand via
+    POST /api/forge/consolidate. Returns the verdict, or None when there was
+    nothing to mine."""
+    mining = await mine_failures(db)
+    if not mining["proposals"]:
+        return None
+    top = mining["proposals"][0]
+    champion = await _current_champion(db)
+    template, origin = await _author_variant(db, champion.prompt_template, mining)
+    payload = {"prompt_template": template}
+    candidate = await propose_candidate(
+        db, source=f"failure-mining:{origin}", kind="prompt-variant",
+        reason=f"{top['cluster']} ×{top['occurrences']}: {top['change']['suggestion']}",
+        payload=payload,
+    )
+    eval_run = await run_eval(
+        db, variant_kind="prompt-variant", payload=payload,
+        variant_name=f"consolidator-{candidate.id}",
+    )
+    if eval_run.score <= 0:
+        # A variant that passes nothing must not displace even a 0-score
+        # bootstrap champion — the bar for changing the live prompt is a
+        # measured win, and zero is not one.
+        candidate.status = "rejected"
+        await db.commit()
+        return {"promoted": False, "origin": origin, "score": 0,
+                "reason": "authored variant scored 0 — nothing measured to gain"}
+    return await promote_if_better(
+        db, eval_run=eval_run, candidate=candidate, kind="prompt-variant",
+        payload=payload,
+    )
+
+
 from app.model_forge.data_gen import SCHEMA_SQL as SCHEMA_SQL_STR
 
 
@@ -227,16 +314,13 @@ async def promote_if_better(db: AsyncSession, *, eval_run: ForgeEvalRun,
     return {"promoted": True, "score": eval_run.score, "git": git_note}
 
 
-def _git_commit_champion(champion: ForgeChampion, eval_run: ForgeEvalRun) -> str:
-    """The agent's own memory is a git repo: every champion change is a commit."""
+def ensure_repo() -> str:
+    """Self-heal the git memory substrate after an ephemeral-container death:
+    restore champion.json from the durable artifact store when the working tree
+    lost it, re-init git if needed, and commit the restoration. The DB champion
+    row stays the source of truth; this repo is the auditable mirror."""
     repo = PROMPT_DATA_DIR / "repo"
     repo.mkdir(parents=True, exist_ok=True)
-    state = {
-        "capability": champion.capability, "kind": champion.kind, "score": champion.score,
-        "prompt_template": champion.prompt_template, "model_path": champion.model_path,
-        "eval_run": eval_run.id, "updated_at": eval_run.ran_at.isoformat(),
-    }
-    (repo / "champion.json").write_text(json.dumps(state, indent=2))
 
     def git(*args: str) -> str:
         out = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
@@ -246,6 +330,41 @@ def _git_commit_champion(champion: ForgeChampion, eval_run: ForgeEvalRun) -> str
         git("init")
         git("config", "user.email", "forge@astraea.local")
         git("config", "user.name", "FORGE")
+    if not (repo / "champion.json").exists():
+        from app.shared import artifacts
+
+        restored = artifacts.read_text("forge/champion.json")
+        if restored:
+            (repo / "champion.json").write_text(restored)
+            git("add", "champion.json")
+            git("commit", "-m", "forge: restore champion memory after instance recycle")
+            return "restored"
+    return "ok"
+
+
+def _git_commit_champion(champion: ForgeChampion, eval_run: ForgeEvalRun) -> str:
+    """The agent's own memory is a git repo: every champion change is a commit,
+    and the state is mirrored to the durable artifact store so an instance
+    recycle can restore it."""
+    repo = PROMPT_DATA_DIR / "repo"
+    state = {
+        "capability": champion.capability, "kind": champion.kind, "score": champion.score,
+        "prompt_template": champion.prompt_template, "model_path": champion.model_path,
+        "eval_run": eval_run.id, "updated_at": eval_run.ran_at.isoformat(),
+    }
+    ensure_repo()
+    (repo / "champion.json").write_text(json.dumps(state, indent=2))
+    try:
+        from app.shared import artifacts
+
+        artifacts.write_text("forge/champion.json", json.dumps(state, indent=2))
+    except Exception:  # noqa: BLE001 — the mirror is best-effort; git commit below is primary
+        pass
+
+    def git(*args: str) -> str:
+        out = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+        return (out.stdout + out.stderr).strip()
+
     git("add", "champion.json")
     msg = f"forge: promote {champion.capability} score={champion.score} (eval #{eval_run.id})"
     if git("commit", "-m", msg) or git("status", "--short"):

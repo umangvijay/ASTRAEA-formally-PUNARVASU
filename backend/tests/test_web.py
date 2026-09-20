@@ -39,6 +39,40 @@ def test_extract_text_title_and_strips_script():
     assert "Visible prose" in out["text"]
 
 
+@pytest.mark.asyncio
+async def test_wikipedia_fallback_when_ddg_empty():
+    wiki = ["q", ["Astraea"], ["star-maiden"], ["https://en.wikipedia.org/wiki/Astraea"]]
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return wiki
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return None
+        async def get(self, url, params=None, **_):
+            if "duckduckgo" in str(url) or "api.duckduckgo" in str(url):
+                class Empty:
+                    status_code = 200
+                    def json(self):
+                        return {}
+                    text = ""
+                return Empty()
+            return FakeResp()
+        async def post(self, url, data=None, **_):
+            class Empty:
+                status_code = 200
+                text = "<html></html>"
+            return Empty()
+
+    with patch("app.operator.web.httpx.AsyncClient", lambda **kw: FakeClient()):
+        hits = await web.search("Astraea constellation", max_results=3)
+    assert hits and hits[0]["url"].startswith("https://en.wikipedia.org/")
+
+
 def test_ddg_links_unwrap_uddg_and_are_unique():
     hits = web._ddg_links(DDG_HTML)
     assert [h["url"] for h in hits] == [
@@ -55,6 +89,32 @@ def test_assert_public_url_blocks_loopback():
     with pytest.raises(ValueError):
         web.assert_public_url("https://192.168.1.9/x")
     assert web.assert_public_url("https://en.wikipedia.org/wiki/Astraea").startswith("https://")
+
+
+def test_ssrf_guard_blocks_full_private_ranges_and_allows_public_literals():
+    """Resolution-based guard: catches the ranges the old prefix checks missed
+    (172.17–31, CGNAT, IPv6 ULA) and non-dotted decimal hosts that resolve
+    into loopback."""
+    import pytest as _pytest
+
+    from app.shared.ssrf import assert_public_host
+
+    for url in (
+        "http://127.0.0.1:9000/health",
+        "http://10.1.2.3/x",
+        "http://172.31.5.4/admin",      # missed by the old "172.16." prefix check
+        "http://172.20.0.9/x",
+        "http://169.254.169.254/latest/meta-data",
+        "http://100.64.0.1/x",           # CGNAT
+        "http://[::1]/x",
+        "http://[fc00::1]/x",
+        "http://[fe80::1]/x",
+        "http://0.0.0.0/x",
+    ):
+        with _pytest.raises(ValueError):
+            assert_public_host(url)
+    # public literal passes without any DNS round-trip
+    assert assert_public_host("https://93.184.216.34/x") == "93.184.216.34"
 
 
 @pytest.mark.asyncio
@@ -165,3 +225,30 @@ async def test_run_task_skips_walled_garden_after_research(app, auth_headers):
     assert result.get("mode") == "web_research"
     assert result.get("browser") == "skipped_walled_garden"
     assert "star-maiden" in result["web"]["pages"][0]["text"]
+
+
+def test_scrape_readable_blocks_preserve_structure():
+    """web.scrape: headings/paragraphs/list items survive in reading order,
+    scripts/styles are stripped — not the whitespace soup of a plain tag-strip."""
+    html = """<html><head><title>Pool sizing</title>
+              <script>alert('no')</script></head><body>
+              <nav>menu menu</nav>
+              <h2>Sizing</h2><p>Raise the pool to 20 connections.</p>
+              <ul><li>PgBouncer in front</li><li>Measure saturation</li></ul>
+              </body></html>"""
+    blocks = web._readable_blocks(html, max_chars=2000)
+    joined = "\n".join(blocks)
+    assert "## Sizing" in joined
+    assert "- PgBouncer in front" in joined
+    assert "alert" not in joined
+
+
+@pytest.mark.asyncio
+async def test_web_scrape_tool_registered(app, auth_headers):
+    """The web.scrape tool is dispatchable by every module's runs (SSRF-guarded)."""
+    from app.core import tools as core_tools
+
+    with pytest.raises(Exception) as exc:
+        await core_tools.run_tool(None, type("R", (), {"tenant_id": "t", "origin_module": "medic"})(),
+                                  "web.scrape", {"url": "http://127.0.0.1/x"})
+    assert "blocked host" in str(exc.value)

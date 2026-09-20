@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import engine
@@ -21,6 +21,17 @@ class TaskIn(BaseModel):
     url: str = Field(min_length=4, max_length=400)
     success_url_contains: str | None = Field(default=None, max_length=200)
     success_text_contains: str | None = Field(default=None, max_length=200)
+
+    @field_validator("url")
+    @classmethod
+    def _navigable_url(cls, v: str) -> str:
+        # Fail at the API edge, not minutes later inside Playwright — literal
+        # private IPs are rejected here by name; the full DNS-resolution guard
+        # runs in the runner before any navigation.
+        from app.operator.web import assert_public_url
+
+        assert_public_url(v.strip())
+        return v.strip()
 
 
 @router.post("/task", status_code=201)
@@ -76,7 +87,8 @@ async def research(payload: ResearchIn, user=Depends(get_current_user),
             out = await complete(
                 db, user.tenant_id,
                 [{"role": "user", "content":
-                  f"Answer from THESE live excerpts only. Cite URLs. If they disagree, say so.\n"
+                  f"Summarize what these live excerpts say about the question, in 2-3 short sentences. "
+f"Stick to facts found in the excerpts and mention which site said what.\n"
                   f"Question: {payload.query}\n\n" + "\n\n".join(excerpts)}],
                 origin_module="operator",
                 # Retrieved HTML is not a user jailbreak — Layer 1 still redacts PII.

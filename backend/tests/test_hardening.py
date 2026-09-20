@@ -175,3 +175,29 @@ def test_cloud_run_missing_secrets_boot(monkeypatch):
         assert config.settings.ingest_token.startswith("cloud-ingest-")
     finally:
         config.settings.jwt_secret, config.settings.ingest_token, config.settings.env = prev
+
+
+async def test_contact_does_not_claim_email(client):
+    resp = await client.post(
+        "/api/contact",
+        json={"name": "Ada", "email": "ada@example.com", "message": "hello from the lab"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["received"] is True
+    assert body["emailed"] is False
+    assert "sent" not in body
+
+
+def test_production_hides_openapi(monkeypatch):
+    prev = settings.env
+    monkeypatch.setattr(settings, "env", "production")
+    try:
+        from app.main import create_app
+
+        app = create_app()
+        assert app.docs_url is None
+        assert app.redoc_url is None
+        assert app.openapi_url is None
+    finally:
+        settings.env = prev

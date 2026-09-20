@@ -218,7 +218,13 @@ async def _serve(websocket: WebSocket, tenant_id: str, adapter: TelephonyAdapter
             await engine.execute(run_id)
             async with SessionLocal() as db:
                 r2 = await db.get(Run, run_id)
-                payload = json.loads(((r2.result or {}).get("outputs", {}) or {}).get("book", "{}") or "{}")
+                raw_out = ((r2.result or {}).get("outputs", {}) or {}).get("book", "{}") if r2 else "{}"
+                try:
+                    payload = json.loads(raw_out or "{}")
+                except json.JSONDecodeError:
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
             if payload:
                 await send({"type": "action", "tool": "vaani.book",
                             "result": {**payload, "run_id": run_id}})
@@ -268,7 +274,13 @@ async def _serve(websocket: WebSocket, tenant_id: str, adapter: TelephonyAdapter
                 continue
             if data.get("type") != "audio":
                 continue
-            pcm = base64.b64decode(data.get("data", ""))
+            try:
+                # one malformed frame must cost a warning, not the whole call
+                pcm = base64.b64decode(data.get("data", ""))
+            except (ValueError, TypeError):
+                logger.warning("vaani: dropped malformed audio frame")
+                await send({"type": "error", "detail": "malformed audio frame — skipped"})
+                continue
             speech, complete_utt = session.feed(pcm, vad.is_speech)
             if speech and session.speech_frames == 2 and session.in_utterance:
                 await send({"type": "utterance_start"})

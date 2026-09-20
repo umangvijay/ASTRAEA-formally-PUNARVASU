@@ -61,6 +61,16 @@ def gvisor_available() -> bool:
     return _gvisor_ok
 
 
+async def docker_available_async() -> bool:
+    """docker_available() off the event loop: the first probe shells out to
+    `docker info` and can block for up to 5s — never on the request path."""
+    return await asyncio.to_thread(docker_available)
+
+
+async def gvisor_available_async() -> bool:
+    return await asyncio.to_thread(gvisor_available)
+
+
 def build_docker_cmd(command: str, *, name: str,
                      image: str | None = None, memory: str | None = None,
                      cpus: str | None = None, pids: int | None = None,
@@ -90,7 +100,9 @@ async def run_sandboxed(command: str, *, timeout: float = 10.0,
     host shell tool: {ok, output, exit_code, sandbox}."""
     name = f"pvu-sbx-{uuid.uuid4().hex[:12]}"
     argv = build_docker_cmd(command, name=name)
-    engine_kind = "gvisor" if gvisor_available() else "docker"
+    # gvisor_available() is now cached from build_docker_cmd — the async probe
+    # above took the blocking subprocess call off the event loop.
+    engine_kind = "gvisor" if await gvisor_available_async() else "docker"
 
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -112,6 +124,11 @@ async def run_sandboxed(command: str, *, timeout: float = 10.0,
         try:
             with_kill()
         except Exception:  # noqa: BLE001
+            pass
+        # reap the killed client — never leak a zombie per timeout
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
             pass
         return {"ok": False, "output": f"tool timeout after {timeout}s",
                 "exit_code": None, "sandbox": engine_kind}

@@ -141,11 +141,36 @@ async def get_summary(
         q = q.where(Benchmark.tenant_id == tenant_id)
 
     rows = (await db.execute(q)).all()
+
+    # latest value per metric in ONE query (was: one get_latest query per metric)
+    latest_q = (
+        select(
+            Benchmark.metric,
+            func.max(Benchmark.recorded_at).label("max_ts"),
+        )
+        .where(Benchmark.module == module)
+        .group_by(Benchmark.metric)
+    )
+    if tenant_id:
+        latest_q = latest_q.where(Benchmark.tenant_id == tenant_id)
+    latest_ts = dict((await db.execute(latest_q)).all())
+    latest_rows = (await db.execute(
+        select(Benchmark.metric, Benchmark.value).where(
+            Benchmark.module == module,
+            Benchmark.recorded_at.in_(latest_ts.values()),
+            *[Benchmark.tenant_id == tenant_id] if tenant_id else [],
+        )
+    )).all()
+    latest_by_metric: dict[str, object] = {}
+    for metric, value in latest_rows:
+        # keep only the row matching that metric's own max timestamp
+        if metric not in latest_by_metric and latest_ts.get(metric) is not None:
+            latest_by_metric[metric] = value
+
     summary = {}
     for row in rows:
-        latest = await get_latest(db, module, row.metric, tenant_id=tenant_id)
         summary[row.metric] = {
-            "latest": latest,
+            "latest": latest_by_metric.get(row.metric),
             "avg": round(float(row.avg), 4) if row.avg else None,
             "min": round(float(row.min), 4) if row.min else None,
             "max": round(float(row.max), 4) if row.max else None,

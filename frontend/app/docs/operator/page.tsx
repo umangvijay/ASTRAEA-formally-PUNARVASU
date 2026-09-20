@@ -8,14 +8,14 @@ export default function Doc() {
       <p style={{ color: "var(--ink-70)", fontSize: 15 }}>
         Google, ChatGPT, Claude and Cursor all look the same to a headless browser
         (login walls). OPERATOR therefore <b>searches and fetches the public web</b>
-        first — DuckDuckGo or Brave — and only then clicks where a real GUI exists.
+        first — Brave, DuckDuckGo, or Wikipedia — and only then clicks where a real GUI exists.
         Every result carries that URL&apos;s live HTML. Nothing is canned.
       </p>
       <PipelineDiagram
         title="RESEARCH PIPELINE"
         stages={[
           { id: "query", label: "Your goal", detail: "Typed in the console. Never a hardcoded prompt." },
-          { id: "search", label: "Live index", detail: "Brave if keyed, else DuckDuckGo Instant + HTML." },
+          { id: "search", label: "Live index", detail: "Brave if keyed, else DuckDuckGo, else Wikipedia (Cloud Run-safe)." },
           { id: "fetch", label: "Real HTML", detail: "SSRF-guarded GET. Title + text extracted from that response." },
           { id: "sentinel", label: "Optional fold", detail: "SENTINEL → Vertex / Gemini / Claude / Groq / Ollama." },
           { id: "loom", label: "Stamped memory", detail: "Provenance: born in OPERATOR, shareable with MEDIC and SHIELD." },

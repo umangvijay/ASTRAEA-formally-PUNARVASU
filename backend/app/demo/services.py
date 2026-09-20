@@ -16,6 +16,7 @@ import json
 import os
 import random
 import socket
+import sys
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -44,10 +45,19 @@ def _config_path(service: str) -> Path:
 
 
 def load_config(service: str) -> dict:
-    """Read from disk on every call — so a planted config bug is real and a patch really fixes it."""
+    """Read from disk on every call — so a planted config bug is real and a patch really fixes it.
+
+    A corrupted config file degrades to the planted defaults (with a loud
+    warning) instead of 500ing /health and silently killing the telemetry tick."""
     path = _config_path(service)
     if path.exists():
-        return json.loads(path.read_text())
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            import logging
+
+            logging.getLogger("demo.%s" % service).warning(
+                "config file unreadable — serving defaults (%s)", path)
     cfg = dict(DEFAULT_CONFIGS[service])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cfg, indent=2))
@@ -171,7 +181,12 @@ def build_app(service: str, port: int) -> FastAPI:
                             "type": "log", "service": service, "level": level, "message": msg},
                             headers=headers)
             except Exception:
-                pass  # emitters never crash the service; PULSE being down is survivable
+                # emitters never crash the service; PULSE being down is
+                # survivable — but a misconfigured INGEST must be visible
+                import logging
+
+                logging.getLogger("demo.%s" % service).warning(
+                    "telemetry emit failed: %s", sys.exc_info()[1])
             await asyncio.sleep(2)
 
     @asynccontextmanager

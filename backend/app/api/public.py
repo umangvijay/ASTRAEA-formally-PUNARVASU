@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import time
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +15,21 @@ from app.shared.deps import get_current_user, get_db
 
 router = APIRouter(tags=["public"])
 
+# unauthenticated endpoint — cheap in-process flood guard (per-IP, sliding hour)
+_contact_rate: dict[str, list[float]] = {}
+_CONTACT_LIMIT = 5
+_CONTACT_WINDOW_S = 3600.0
+
+
+def _contact_allowed(ip: str) -> bool:
+    now = time.time()
+    bucket = [t for t in _contact_rate.get(ip, []) if now - t < _CONTACT_WINDOW_S]
+    allowed = len(bucket) < _CONTACT_LIMIT
+    if allowed:
+        bucket.append(now)
+    _contact_rate[ip] = bucket
+    return allowed
+
 
 class ContactIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
@@ -20,30 +38,34 @@ class ContactIn(BaseModel):
 
 
 @router.post("/api/contact", status_code=201)
-async def contact(payload: ContactIn, db: AsyncSession = Depends(get_db)):
-    from app.core.models import Tenant, User
+async def contact(payload: ContactIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from fastapi import HTTPException
+
+    from app.core.models import Tenant
     from app.loom import service as loom
 
-    founder = (
-        await db.execute(select(User).where(User.email == "founder@astraea.local"))
+    ip = request.client.host if request.client else "unknown"
+    if not _contact_allowed(ip):
+        raise HTTPException(status_code=429, detail="too many contact messages — try later")
+
+    # Messages land in the HQ workspace. No user row is provisioned here: an
+    # unauthenticated endpoint used to mint a superadmin account (with a random
+    # password) on first hit — a standing account-creation hole.
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.name == "Astraea HQ"))
     ).scalar_one_or_none()
-    if founder is None:
+    if tenant is None:
         tenant = Tenant(name="Astraea HQ")
         db.add(tenant)
         await db.flush()
-        db.add(User(tenant_id=tenant.id, email="founder@astraea.local",
-                    password_hash="", full_name="Umang Vijay", role="superadmin"))
-        await db.flush()
-        tid = tenant.id
-    else:
-        tid = founder.tenant_id
+    tid = tenant.id
 
     await loom.write_item(
         db, tid, origin_module="contact", kind="message",
         title=f"Message from {payload.name}", summary=payload.message[:200],
         payload={"name": payload.name, "email": payload.email, "message": payload.message},
     )
-    return {"sent": True}
+    return {"received": True, "emailed": False}
 
 
 class BlogIn(BaseModel):

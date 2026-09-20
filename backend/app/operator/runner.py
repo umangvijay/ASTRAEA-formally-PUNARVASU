@@ -27,6 +27,15 @@ async def run_task(db: AsyncSession, run, args: dict) -> dict:
     success_value = args.get("success_value", "")
     if not goal or not (url or html):
         raise ValueError("operator.run_task needs a goal and a url (or html)")
+    if url:
+        # SSRF guard on the BROWSER path, resolution included: the headless
+        # session obeys the same private-network rule as web.fetch — without
+        # this, /api/operator/task (or a tenant workflow with an
+        # operator.run_task step) could drive the browser into 127.0.0.1 /
+        # cloud metadata endpoints.
+        from app.operator.web import _assert_fetchable
+
+        await _assert_fetchable(str(url))
 
     session = BrowserSession()
     actions_taken: list[dict] = []

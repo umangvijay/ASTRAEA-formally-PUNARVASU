@@ -41,7 +41,13 @@ async def run_tool(db, run, name: str, args: dict) -> dict:
         result = await operator_run_task(db, run, args)
         return {"ok": bool(result.get("success")), "output": str(result.get("content", "")), **result}
     if name == "vaani.book":
-        booking = json.loads(args.get("booking_json", "{}"))
+        try:
+            booking = json.loads(args.get("booking_json", "{}"))
+        except json.JSONDecodeError as exc:
+            # a malformed booking must read as a validation error, not a raw traceback
+            raise ValueError(f"booking_json is not valid JSON: {exc}")
+        if not isinstance(booking, dict):
+            raise ValueError("booking_json must be a JSON object")
         from app.vaani.brain import book as vaani_book
 
         result = await vaani_book(db, run.tenant_id, booking, origin_run_id=run.id)
@@ -56,7 +62,7 @@ async def run_tool(db, run, name: str, args: dict) -> dict:
 
         result = await medic_dispatch(db, run, name, args)
         return {"ok": True, "output": str(result.get("content", "")), **result}
-    if name in ("web.search", "web.fetch", "web.research"):
+    if name in ("web.search", "web.fetch", "web.research", "web.scrape"):
         from app.operator import web as webmod
 
         if name == "web.search":
@@ -65,6 +71,13 @@ async def run_tool(db, run, name: str, args: dict) -> dict:
             return {"ok": True, "output": json.dumps(hits, default=str), "hits": hits}
         if name == "web.fetch":
             page = await webmod.fetch_url(str(args.get("url", "")))
+            return {"ok": page.get("ok", False), "output": json.dumps(page, default=str), **page}
+        if name == "web.scrape":
+            page = await webmod.scrape_url(
+                str(args.get("url", "")),
+                limit=min(int(args.get("limit", 12_000)), 40_000),
+                include_links=bool(args.get("include_links", True)),
+            )
             return {"ok": page.get("ok", False), "output": json.dumps(page, default=str), **page}
         pack = await webmod.research(str(args.get("query", "")),
                                      max_results=int(args.get("max_results", 4)))
@@ -90,7 +103,7 @@ async def _shell(args: dict) -> dict:
     if settings.sandbox_enabled:
         from app.core import sandbox
 
-        if sandbox.docker_available():
+        if await sandbox.docker_available_async():
             return await sandbox.run_sandboxed(command, timeout=timeout, max_output=max_output)
         global _host_fallback_warned
         if not _host_fallback_warned:
@@ -114,6 +127,11 @@ async def _shell_host(command: str, timeout: float, max_output: int) -> dict:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
+        # reap the killed child — otherwise every timeout leaks a zombie
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
         return {"ok": False, "output": f"tool timeout after {timeout}s",
                 "exit_code": None, "sandbox": "host"}
     return {
@@ -129,8 +147,12 @@ async def _http_get(args: dict) -> dict:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("http_get requires a valid http(s) url")
-    if any(parsed.hostname.startswith(b) or parsed.hostname == b.strip('.') for b in BLOCKED_HOSTS):
-        raise ValueError("blocked host (private network range)")
+    # Resolution-based SSRF guard: the hostname must resolve to public
+    # addresses only — prefix checks missed 172.17-31, CGNAT, IPv6 ULA and
+    # non-dotted hosts (decimal/hex) that resolve into private space.
+    from app.shared.ssrf import aassert_public_host
+
+    await aassert_public_host(url)
     timeout = min(float(args.get("timeout", 10)), 20)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         resp = await client.get(url, headers={"User-Agent": "Astraea-Agent/0.2"})

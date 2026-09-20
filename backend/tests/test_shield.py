@@ -166,3 +166,18 @@ async def test_benign_drill_false_positives_under_10_percent(app, auth_headers):
             flagged += 1
     fp_rate = flagged / windows
     assert fp_rate < 0.10, f"false positive rate {fp_rate:.1%} breaches the 10% gate"
+
+
+def test_if_score_is_real_statistical_corroboration():
+    """The Isolation-Forest layer is wired as evidence: enough history → a
+    (negative = anomalous) score; no history → None, never a fabricated number."""
+    from app.shield.detector import if_score
+
+    assert if_score([], [1.0, 2.0]) is None
+    assert if_score([[0.0, 0.0, 0.0]] * 5, [0.0, 0.0, 0.0]) is None  # < 20 events
+
+    calm = [[10.0 + (i % 3) * 0.4, 80.0 + (i % 4) * 2.0, 0.0] for i in range(30)]
+    burst = [9_000_000.0, 443.0, 1.0]
+    score = if_score(calm, burst)
+    assert score is not None and score < 0  # the exfil burst is anomalous
+    assert if_score(calm, [10.2, 82.0, 0.0]) >= 0  # business as usual

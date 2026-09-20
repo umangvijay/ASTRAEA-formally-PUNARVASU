@@ -196,8 +196,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             </div>
           </div>
           <p className="label" style={{ lineHeight: 1.8 }}>
-            spec → docs/MASTER_SPEC.md<br />
-            ops → docs/RUNBOOK.md
+            <Link href="/docs">spec → /docs</Link><br />
+            <Link href="/docs/architecture">ops → /docs/architecture</Link>
           </p>
         </aside>
       </div>

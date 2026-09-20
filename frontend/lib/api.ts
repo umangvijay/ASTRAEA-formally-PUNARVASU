@@ -82,7 +82,7 @@ export const MODULES: ModuleMeta[] = [
     profile: "operator",
     phase: 3,
     blurb:
-      "Searches, fetches and reads real public pages (DuckDuckGo / Brave), then operates screens where no API exists — vision-guided clicking with screenshot verification.",
+      "Searches, fetches and reads real public pages (Brave / DuckDuckGo / Wikipedia), then operates screens where no API exists — vision-guided clicking with screenshot verification.",
     benchmark: "Success rate on a 20-task web suite",
   },
   {

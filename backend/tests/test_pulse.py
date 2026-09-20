@@ -110,3 +110,56 @@ def _tid(auth_headers) -> str:
     from app.shared.security import decode_access_token
 
     return decode_access_token(auth_headers["Authorization"].removeprefix("Bearer "))["tid"]
+
+
+_SELF_SERIES = "astraea-api"
+
+
+async def _seed_self_series(tenant_id: str, *, storm: bool) -> None:
+    """40+ points of a flatline baseline followed by an obvious burst — pre-gate,
+    the degenerate-baseline path in detect_once treated this as a real incident."""
+    from app.pulse.models import MetricPoint
+
+    async with SessionLocal() as db:
+        for _ in range(34):
+            db.add(MetricPoint(tenant_id=tenant_id, service=_SELF_SERIES, **NORMAL))
+        for _ in range(6):
+            db.add(MetricPoint(tenant_id=tenant_id, service=_SELF_SERIES,
+                               **(FAULT_SHAPES["error_storm"] if storm else NORMAL)))
+        await db.commit()
+
+
+async def test_self_series_never_pages_without_open_chaos(app):
+    """Audit HIGH-3: the platform watching itself must not spawn MEDIC runs for its
+    own traffic bursts. astraea-api only pages when a chaos fault is open on it."""
+    from sqlalchemy import select as _select
+
+    tenant_id = "tenant-self-obs"
+    await _seed_self_series(tenant_id, storm=True)
+
+    assert await detector.detect_once(tenant_id) == []
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            _select(Anomaly).where(Anomaly.tenant_id == tenant_id))).scalars().all()
+    assert rows == []
+
+
+async def test_self_series_pages_when_a_chaos_fault_is_open(app):
+    """The gate opens only for a live fault on the self-series — the MTTD benchmark
+    demo keeps working, and every persisted anomaly carries its run."""
+    from sqlalchemy import select as _select
+
+    tenant_id = "tenant-self-obs-fault"
+    async with SessionLocal() as db:
+        db.add(FaultInjection(tenant_id=tenant_id, service=_SELF_SERIES, kind="error_storm"))
+        await db.commit()
+    await _seed_self_series(tenant_id, storm=True)
+
+    anomalies = await detector.detect_once(tenant_id)
+    assert len(anomalies) == 1
+    assert anomalies[0].service == _SELF_SERIES
+    assert anomalies[0].run_id  # no runless anomalies (audit MEDIUM)
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            _select(Anomaly).where(Anomaly.tenant_id == tenant_id))).scalars().all()
+    assert len(rows) == 1 and rows[0].run_id == anomalies[0].run_id

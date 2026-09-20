@@ -19,6 +19,32 @@ from app.config import settings
 _KEY: bytes | None = None
 
 
+def _persisted_key_secret() -> str:
+    """A stable secret for deployments without a real JWT secret: a random key
+    persisted once in the data dir. Deriving from the per-process ephemeral
+    dev secret destroyed every stored secret on every restart."""
+    path = settings.data_dir / "vault.key"
+    try:
+        if path.exists():
+            material = path.read_text().strip()
+            if material:
+                return material
+        import secrets as _secrets
+
+        material = _secrets.token_hex(32)
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(material)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return material
+    except OSError:
+        # unwritable data dir (read-only fs): previous behaviour — derive from
+        # whatever jwt secret exists — rather than failing every vault op
+        return settings.jwt_secret or "astraea-vault-fallback"
+
+
 def _master_key() -> bytes:
     global _KEY
     if _KEY is None:
@@ -35,8 +61,11 @@ def _master_key() -> bytes:
                 raise ValueError("ASTRAEA_VAULT_KEY must decode to 32 bytes")
             _KEY = key
         else:
+            secret = settings.jwt_secret
+            if not secret or secret.startswith("ephemeral-"):
+                secret = _persisted_key_secret()
             _KEY = hashlib.scrypt(
-                settings.jwt_secret.encode(), salt=b"astraea-vault-v1",
+                secret.encode(), salt=b"astraea-vault-v1",
                 n=2**14, r=8, p=1, dklen=32,
             )
     return _KEY

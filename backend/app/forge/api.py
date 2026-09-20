@@ -6,6 +6,8 @@ champion for a capability is global-by-design (one shared, measured best).
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import desc, or_, select
@@ -69,7 +71,7 @@ async def overview(user=Depends(get_current_user), db: AsyncSession = Depends(ge
 
 
 class CandidateIn(BaseModel):
-    kind: str  # prompt-variant | model
+    kind: Literal["prompt-variant", "model"]  # anything else was a silent 201 before
     prompt_template: str | None = None
     reason: str = ""
 
@@ -116,3 +118,15 @@ async def run_eval(payload: EvalIn, user=Depends(get_current_user), db: AsyncSes
     )
     return {"eval_run_id": eval_run.id, "passed": eval_run.passed, "total": eval_run.total,
             "score": eval_run.score, **verdict}
+
+
+@router.post("/consolidate")
+async def consolidate(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Trigger the self-evolution cycle NOW instead of waiting for the nightly
+    consolidator: mine this tenant's real run failures → propose a candidate →
+    evaluate on the verifiable suite → promote only on a measured win."""
+    verdict = await forge_eval.consolidate_once(db)
+    if verdict is None:
+        return {"status": "nothing-to-mine",
+                "detail": "no recurring step failures found — nothing to evolve yet"}
+    return {"status": "done", **verdict}

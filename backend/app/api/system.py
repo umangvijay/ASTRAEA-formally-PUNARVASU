@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,7 @@ from app.shared.deps import get_current_user, get_db
 router = APIRouter(tags=["system"])
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 async def health(request: Request) -> dict:
     ready = getattr(request.app.state, "ready", True)
     boot_error = getattr(request.app.state, "boot_error", None)
@@ -26,6 +26,21 @@ async def health(request: Request) -> dict:
         status = "boot_failed"
     elif not ready:
         status = "starting"
+    llm: dict = {"ok": False, "provider": None, "model": None, "error": None}
+    vertex_ready = False
+    try:
+        from app.sentinel.upstream import _vertex_ready, pick_provider
+
+        vertex_ready = _vertex_ready()
+        provider, model = pick_provider(None)
+        llm = {
+            "ok": provider not in ("model_forge", "mlx_local"),
+            "provider": provider,
+            "model": model,
+            "error": None,
+        }
+    except Exception as exc:  # noqa: BLE001 — health must never 500
+        llm["error"] = str(exc)[:200]
     return {
         "status": status,
         "app": settings.app_name.lower(),
@@ -34,6 +49,8 @@ async def health(request: Request) -> dict:
         "profile": settings.active_profile,
         "phase": settings.phase,
         "vertex_configured": bool(settings.vertex_project),
+        "vertex_ready": vertex_ready,
+        "llm": llm,
         "boot_error": boot_error,
     }
 
@@ -65,7 +82,11 @@ async def put_workspace(payload: WorkspaceIn, user=Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
     from app.shared import workspace as ws
 
-    state = await ws.set_mode(db, user.tenant_id, payload.mode, payload.module)
+    try:
+        state = await ws.set_mode(db, user.tenant_id, payload.mode, payload.module)
+    except ValueError as exc:
+        # unknown module/mode is a client error, not a 500
+        raise HTTPException(status_code=422, detail=str(exc))
     return {"mode": payload.mode, "solo_module": payload.module if payload.mode == "solo" else None,
             "modules": state}
 
@@ -124,7 +145,7 @@ async def selftest(user=Depends(get_current_user), db: AsyncSession = Depends(ge
             fresh = (dt.datetime.now(dt.timezone.utc) - ts).total_seconds() < 60
         checks["telemetry_stream"] = {"ok": fresh,
                                       "detail": "live points within 60s" if fresh
-                                      else "no points yet — start demo services (profile sre/all)"}
+                                      else "no points yet — MEDIC live series or POST /api/pulse/ingest"}
     except Exception as exc:  # noqa: BLE001
         checks["telemetry_stream"] = {"ok": False, "detail": str(exc)[:120]}
 

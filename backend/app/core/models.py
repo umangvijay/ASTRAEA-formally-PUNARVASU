@@ -161,3 +161,18 @@ class TenantModule(Base):
     tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), primary_key=True)
     module: Mapped[str] = mapped_column(String(30), primary_key=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="1")
+
+
+class LoginAttempt(Base):
+    """DB-backed login throttling — the source of truth is shared, so every
+    instance behind the load balancer sees the same window and lockout state
+    (the old in-process dicts reset per instance and per restart)."""
+
+    __tablename__ = "login_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ip: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )

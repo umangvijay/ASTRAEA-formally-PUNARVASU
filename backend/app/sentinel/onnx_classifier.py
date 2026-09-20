@@ -51,9 +51,11 @@ def _ensure_model() -> bool:
             from transformers import AutoTokenizer
 
             model_dir = _CACHE_DIR / _MODEL_ID.replace("/", "--")
-            onnx_path = model_dir / "model.onnx"
+            # The ONNX file may sit at the repo root or under onnx/ — find it BEFORE
+            # any network call so a warm cache boots with zero HF round-trips.
+            onnx_path = next((p for p in sorted(model_dir.glob("**/*.onnx"))), None)
 
-            if not onnx_path.exists():
+            if onnx_path is None:
                 logger.info("sentinel.onnx: downloading %s (first run, ~400 MB)…", _MODEL_ID)
                 try:
                     from huggingface_hub import snapshot_download
@@ -67,8 +69,7 @@ def _ensure_model() -> bool:
                                    "cannot auto-download model — layer skipped")
                     return False
 
-            if not onnx_path.exists():
-                # Model repo might not have a pre-exported ONNX; try the exported one
+            if onnx_path is None:
                 for candidate in model_dir.glob("**/*.onnx"):
                     onnx_path = candidate
                     break
@@ -123,9 +124,11 @@ def _dedupe_and_window(text: str) -> list[str]:
 
 def _classify_one(text: str, *, max_length: int = 512) -> float | None:
     try:
+        # No padding: single-sample inference — padding to max_length made every
+        # window pay the full 512-token cost even for a one-line message.
         inputs = _tokenizer(
             text, return_tensors="np", truncation=True,
-            max_length=max_length, padding="max_length",
+            max_length=max_length,
         )
         feed = {k: v for k, v in inputs.items() if k in {inp.name for inp in _session.get_inputs()}}
         logits = _session.run(None, feed)[0][0]

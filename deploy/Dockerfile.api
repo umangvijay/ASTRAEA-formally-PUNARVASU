@@ -19,6 +19,11 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.cloud.txt
 COPY backend /app/backend
 COPY docs /app/docs
 
+# never run as root inside the container
+RUN useradd --system --uid 10001 --no-create-home astraea \
+    && mkdir -p /app/data && chown -R astraea:astraea /app
+USER astraea
+
 EXPOSE 8080
 # Do not block PORT on alembic — create_all in lifespan creates sqlite tables.
 # A hanging Cloud SQL URL used to never bind, and Cloud Run returned HTML 500.

@@ -80,15 +80,23 @@ async def _correlate(db: AsyncSession, run, args: dict) -> dict:
 
     narrative = None
     try:
+        import asyncio
+
+        from app.config import settings as _settings
         from app.sentinel.llm import complete
 
-        out = await complete(
-            db, run.tenant_id,
-            [{"role": "user", "content":
-                f"You are SHIELD, a senior SOC analyst. Write a tight incident narrative "
-                f"(max 6 sentences) from these verified facts, referencing the MITRE techniques:\n"
-                f"{json.dumps(facts, default=str)}\nNarrative:"}],
-            origin_module="shield", run_id=run.id,
+        # Bounded: a stalled provider must fall back to the facts narrative,
+        # never pin the containment run in `running` past its lease.
+        out = await asyncio.wait_for(
+            complete(
+                db, run.tenant_id,
+                [{"role": "user", "content":
+                    f"You are SHIELD, a senior SOC analyst. Write a tight incident narrative "
+                    f"(max 6 sentences) from these verified facts, referencing the MITRE techniques:\n"
+                    f"{json.dumps(facts, default=str)}\nNarrative:"}],
+                origin_module="shield", run_id=run.id,
+            ),
+            timeout=max(5, _settings.llm_step_timeout_s),
         )
         narrative = out["content"].strip()
     except Exception:  # noqa: BLE001 — fallback assembles facts, never invents

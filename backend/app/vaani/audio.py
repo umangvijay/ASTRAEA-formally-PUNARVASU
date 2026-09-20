@@ -166,19 +166,10 @@ def _transcribe_gemini(pcm16: bytes) -> str:
             }],
             "generationConfig": {"temperature": 0, "maxOutputTokens": 256},
         }
-        loc, proj = settings.vertex_location, settings.vertex_project
         if provider == "vertex":
-            from app.sentinel.upstream import _vertex_adc_token
+            from app.sentinel.upstream import vertex_generate_url
 
-            url = (
-                f"https://{loc}-aiplatform.googleapis.com/v1/projects/{proj}/locations/{loc}"
-                f"/publishers/google/models/{model.removeprefix('vertex/')}:generateContent"
-            )
-            token = settings.vertex_access_token or _vertex_adc_token()
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
-            key = settings.vertex_api_key or (settings.gemini_api_key if not token else "")
-            if key and not token:
-                url += f"?key={key}"
+            url, headers = vertex_generate_url(model, stream=False)
         else:
             url = (
                 "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -232,19 +223,37 @@ async def synthesize(text: str) -> bytes:
             return b""
 
 
-async def _synthesize_piper(text: str) -> bytes:
-    import piper  # noqa: F401 — raises ImportError when absent
+_piper_voice = None
 
-    voice_path = settings.data_dir / "piper-voice.onnx"
-    if not voice_path.exists():
-        raise RuntimeError("piper voice model not provisioned")
-    from piper import PiperVoice
 
-    voice = PiperVoice.load(str(voice_path))
+def _piper_voice_model():
+    """Load the Piper voice once per process — reloading per sentence wasted
+    seconds of CPU on every utterance."""
+    global _piper_voice
+    if _piper_voice is None:
+        import piper  # noqa: F401 — raises ImportError when absent
+
+        voice_path = settings.data_dir / "piper-voice.onnx"
+        if not voice_path.exists():
+            raise RuntimeError("piper voice model not provisioned")
+        from piper import PiperVoice
+
+        _piper_voice = PiperVoice.load(str(voice_path))
+    return _piper_voice
+
+
+def _synthesize_piper_sync(text: str) -> bytes:
+    voice = _piper_voice_model()
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         voice.synthesize(text, w)
     return buf.getvalue()
+
+
+async def _synthesize_piper(text: str) -> bytes:
+    # Piper inference is CPU-bound sync work — it belongs in a thread, never on
+    # the event loop that serves every concurrent voice call.
+    return await asyncio.to_thread(_synthesize_piper_sync, text)
 
 
 async def _synthesize_say(text: str) -> bytes:

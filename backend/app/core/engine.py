@@ -15,17 +15,21 @@ Step types: llm | tool | loom_write | approval.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.models import Run, RunEvent
 from app.core.tools import run_tool
 from app.db import SessionLocal
 from app.loom import service as loom
 from app.sentinel.llm import complete
 from app.shared.bus import publish
+
+logger = logging.getLogger("core.engine")
 
 _RUNNING: set[str] = set()
 _TASKS: set[asyncio.Task] = set()  # strong refs — fire-and-forget tasks must not be GC'd mid-run
@@ -120,9 +124,14 @@ async def _run_step(db: AsyncSession, run: Run, step: dict, ctx: dict[str, dict]
                 "type": "llm_delta", "node": node, "payload": {"text": delta},
             })
 
-        out = await complete(db, run.tenant_id, messages, model=step.get("model"),
-                             origin_module=run.origin_module, run_id=run.id,
-                             on_delta=on_delta)
+        # A stalled provider must park the run as failed, not pin it in
+        # `running` forever (the worker heartbeat would keep renewing its lease).
+        out = await asyncio.wait_for(
+            complete(db, run.tenant_id, messages, model=step.get("model"),
+                     origin_module=run.origin_module, run_id=run.id,
+                     on_delta=on_delta),
+            timeout=max(5, settings.llm_step_timeout_s),
+        )
         return {"content": out["content"], "provider": out["provider"], "model": out["model"],
                 "usage": out["usage"], "guardrails": out["guardrails"]}
 
@@ -180,7 +189,8 @@ async def _execute(run_id: str) -> None:
                     if name in granted:
                         continue
                     run.status = "awaiting_approval"
-                    await db.commit()
+                    # status + gate event commit atomically — a parked run is
+                    # never visible without its approval_required event
                     await _emit(db, run, "approval_required", node=name,
                                 payload={"prompt": str(step.get("prompt", "Approve this step?"))})
                     return  # parked — durable across restarts
@@ -191,7 +201,7 @@ async def _execute(run_id: str) -> None:
                 except Exception as exc:  # noqa: BLE001 — engine must record, never crash silent
                     run.status = "failed"
                     run.error = str(exc)[:800]
-                    await db.commit()
+                    # status + failure evidence commit atomically (same rule as completion)
                     await _emit(db, run, "step_failed", node=name, payload={"error": str(exc)[:500]})
                     await _emit(db, run, "run_failed", payload={"error": str(exc)[:500]})
                     return
@@ -205,10 +215,20 @@ async def _execute(run_id: str) -> None:
             run.result = {
                 "outputs": {n: (o.get("content") if isinstance(o, dict) else o) for n, o in ctx.items()},
             }
-            await db.commit()
+            # NO commit here — _emit's commit persists status + terminal event
+            # atomically, so a reader can never see a completed run whose
+            # run_completed event does not exist yet
             await _emit(db, run, "run_completed", payload={"steps": sorted(ctx.keys())})
     finally:
         _RUNNING.discard(run_id)
+
+
+def _spawn_done(task: asyncio.Task) -> None:
+    _TASKS.discard(task)
+    # a fire-and-forget task that dies silently leaves its run queued forever —
+    # at least make the crash visible
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("run supervision task crashed", exc_info=task.exception())
 
 
 def spawn(run_id: str) -> None:
@@ -221,7 +241,7 @@ def spawn(run_id: str) -> None:
 
     task = asyncio.get_running_loop().create_task(supervise(run_id))
     _TASKS.add(task)
-    task.add_done_callback(_TASKS.discard)
+    task.add_done_callback(_spawn_done)
 
 
 async def wait_all(timeout: float = 15.0) -> None:
@@ -273,7 +293,7 @@ async def reject(run_id: str, note: str | None = None) -> dict:
         )
         run.status = "failed"
         run.error = f"rejected at approval gate '{pending}': {note or 'no reason given'}"
-        await db.commit()
+        # status + rejection events commit atomically
         await _emit(db, run, "approval_denied", node=pending, payload={"note": note or ""})
         await _emit(db, run, "run_failed", payload={"error": run.error})
         return {"status": "rejected", "node": pending}
@@ -289,7 +309,7 @@ async def recover_orphans() -> int:
         )
         for run in runs:
             run.status = "interrupted"
-            await db.commit()
+            # status + event commit atomically (same rule as terminal states)
             await _emit(db, run, "run_interrupted",
                         payload={"reason": "process died mid-run — resume to continue"})
             count += 1

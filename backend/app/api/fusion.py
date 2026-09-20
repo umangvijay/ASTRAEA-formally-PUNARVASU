@@ -129,5 +129,7 @@ async def timeline(limit: int = 40, user=Depends(get_current_user),
                           f"{item.kind}: {item.title[:80]}",
                           (item.summary or "")[:140], item.created_at, "/console/loom"))
 
-    out.sort(key=lambda e: (not e.get("attention", False), e["ts"]), reverse=True)
+    # attention items first (that is the entire point of the flag), newest
+    # first within each group — the old key inverted this and sank them.
+    out.sort(key=lambda e: (e.get("attention", False), e["ts"]), reverse=True)
     return {"timeline": out[:limit]}

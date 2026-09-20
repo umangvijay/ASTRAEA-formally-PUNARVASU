@@ -29,7 +29,7 @@ export default function Doc() {
         title="OPERATOR WEB PIPELINE"
         stages={[
           { id: "goal", label: "Live input", detail: "Your words. No canned goal, no canned answer." },
-          { id: "search", label: "Index", detail: "Brave or DuckDuckGo — a real query against a live index." },
+          { id: "search", label: "Index", detail: "Brave if keyed, else DuckDuckGo, else Wikipedia from Cloud Run." },
           { id: "fetch", label: "Page", detail: "HTTP GET, SSRF-blocked private ranges, extracted text." },
           { id: "brain", label: "Model", detail: "Vertex on GCloud, else Gemini / Claude / Groq / Ollama." },
           { id: "memory", label: "LOOM", detail: "Provenance stamp: born in OPERATOR." },
@@ -38,7 +38,7 @@ export default function Doc() {
 
       <h2 className="display" style={{ fontSize: 21, marginTop: 34 }}>Modules</h2>
       <p style={{ color: "var(--ink-70)", fontSize: 15 }}>
-        Six products share <b>SENTINEL</b>, <b>LOOM</b> and <b>PULSE</b>. Start
+        Six lab agents share <b>SENTINEL</b>, <b>LOOM</b> and <b>PULSE</b>. Start
         one (SOLO) or all (FUSION). Switching never re-onboards you.
       </p>
       <div className="docs-steps">

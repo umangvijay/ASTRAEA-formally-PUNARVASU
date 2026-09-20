@@ -32,6 +32,10 @@ python3 main.py                 # full platform — every module heartbeat on
 python3 main.py --check         # environment report only
 ```
 
+**Feature guides** live in the console itself and on the site: [/docs](frontend/app/docs) —
+one page per feature (what it's for, how it works, how to use it): Fusion, Runs,
+Memory, Sentinel, MEDIC, SHIELD, OPERATOR, VAANI, FORGE, MODEL-FORGE, Settings/Vault.
+
 Then open **http://localhost:3000** → create an account → console.
 
 First run auto-creates the Python venv and installs frontend deps. API keys are **not

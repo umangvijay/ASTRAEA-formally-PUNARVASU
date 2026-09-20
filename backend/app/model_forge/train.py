@@ -4,7 +4,7 @@ python -m app.model_forge.train   does the full loop:
   1. generate verifiable SQL task pairs (train + held-out)
   2. LoRA fine-tune the base model with MLX (the on-device path; the Colab SFT+GRPO
      scale-up uses the same JSONL contract + executable reward — see
-     notebooks/model_forge_grpo.md)
+     notebooks/model_forge_grpo.ipynb)
   3. evaluate base vs trained on the held-out set with the executable reward
      (the SQL must run and return the gold rows)
   4. print the verdict; promotion into the champion seat happens through FORGE

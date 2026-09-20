@@ -56,6 +56,9 @@ async def _start_heartbeats() -> None:
 
     if "pytest" not in sys.modules:
         pulse_live.start()
+        from app.shared import retention
+
+        retention.start()
     lab_flag = os.environ.get("ASTRAEA_SHIELD_LAB", "").lower()
     want_lab = lab_flag in ("1", "true", "yes") or (
         not on_cloud_run() and not settings.is_production and lab_flag not in ("0", "false", "no")
@@ -64,10 +67,11 @@ async def _start_heartbeats() -> None:
         if getattr(shield_lab, "_benign_task", None) is None or shield_lab._benign_task.done():
             shield_lab._benign_task = asyncio.get_running_loop().create_task(shield_lab.benign_loop())
     logger.info(
-        "heartbeats on: pulse(%ss) shield(%ss) forge(%ss) live-telemetry lab=%s",
+        "heartbeats on: pulse(%ss) shield(%ss) forge(%ss) live-telemetry retention(%ss) lab=%s",
         settings.detector_interval_seconds,
         settings.shield_detector_interval_seconds,
         settings.forge_consolidator_interval_s,
+        max(300, settings.retention_interval_seconds),
         want_lab,
     )
 
@@ -141,6 +145,26 @@ async def lifespan(app: FastAPI):
 
         asyncio.get_running_loop().create_task(_vector_backfill())
 
+        # Warm the lazy ML models off the request path: the ONNX injection
+        # classifier and the MiniLM embedder otherwise load inside the first
+        # run's steps and add seconds to the very first user interaction.
+        async def _warm_models():
+            try:
+                from app.sentinel import onnx_classifier
+
+                await asyncio.get_running_loop().run_in_executor(
+                    None, onnx_classifier._ensure_model)
+                from app.shared import vector
+
+                await asyncio.get_running_loop().run_in_executor(
+                    None, vector.get_embedder)
+                logger.info("model warmup: sentinel classifier + vector embedder ready (%s)",
+                            vector.embed_kind())
+            except Exception:  # noqa: BLE001 — warmup is best-effort; fallbacks exist
+                logger.warning("model warmup skipped", exc_info=True)
+
+        asyncio.get_running_loop().create_task(_warm_models())
+
         await _start_heartbeats()
 
         from app.config import settings as _settings
@@ -151,6 +175,13 @@ async def lifespan(app: FastAPI):
             for _ in range(max(1, _settings.run_workers))
         ]
         logger.info("started %d durable run worker(s)", len(worker_tasks))
+
+        # Postgres: cross-instance SSE fan-out via LISTEN/NOTIFY (see shared/bus.py).
+        # sqlite stays single-process by design — the lab path needs no broker.
+        from app.shared import bus as shared_bus
+
+        if shared_bus.start_shared():
+            logger.info("bus: shared fan-out active (postgres LISTEN/NOTIFY)")
 
         async def self_heal():
             """Every 30s: restart dead heartbeats, reset stuck runs, expire old guests."""
@@ -183,6 +214,12 @@ async def lifespan(app: FastAPI):
                         from app.core.models import Run as _Run, Tenant, User
 
                         stale = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+                        # Guests whose runs are all terminal still hold a tenant row
+                        # forever if nothing reaps them — give them a longer grace,
+                        # then reap too. Guests with live (queued/running/parked) runs
+                        # are always kept and counted so the accumulation is visible.
+                        stale_hard = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=24)
+                        active_statuses = ("queued", "running", "awaiting_approval")
                         async with SessionLocal() as db:
                             guests = (
                                 await db.execute(
@@ -194,19 +231,44 @@ async def lifespan(app: FastAPI):
                                 )
                             ).scalars().all()
                             removed = 0
+                            skipped_active = 0
+                            skipped_terminal = 0
                             for g in guests:
                                 tid = g.tenant_id
-                                has_runs = (await db.execute(
+                                has_live_run = (await db.execute(
+                                    select(_Run.id).where(
+                                        _Run.tenant_id == tid, _Run.status.in_(active_statuses)
+                                    ).limit(1)
+                                )).first()
+                                if has_live_run:
+                                    skipped_active += 1
+                                    continue
+                                has_any_run = (await db.execute(
                                     select(_Run.id).where(_Run.tenant_id == tid).limit(1)
                                 )).first()
-                                if has_runs:
-                                    continue
+                                if has_any_run:
+                                    exp = g.expires_at
+                                    if exp is not None and exp.tzinfo is None:
+                                        exp = exp.replace(tzinfo=dt.timezone.utc)
+                                    if exp is None or exp >= stale_hard:
+                                        skipped_terminal += 1
+                                        continue
                                 await db.execute(delete(User).where(User.id == g.id))
                                 await db.execute(delete(Tenant).where(Tenant.id == tid))
                                 removed += 1
-                            if removed:
+                            if removed or skipped_active or skipped_terminal:
                                 await db.commit()
-                                logger.info("self-heal: removed %d expired guest workspace(s)", removed)
+                                logger.info(
+                                    "self-heal: removed %d expired guest workspace(s); "
+                                    "kept %d with live run(s), %d terminal awaiting hard grace",
+                                    removed, skipped_active, skipped_terminal,
+                                )
+                        from app.api.auth import _cleanup_old_attempts
+
+                        async with SessionLocal() as db:
+                            pruned = await _cleanup_old_attempts(db)
+                        if pruned:
+                            logger.info("self-heal: pruned %d old login-attempt row(s)", pruned)
                 except Exception:  # noqa: BLE001 — self-heal must never crash
                     logger.exception("self-heal tick failed")
 
@@ -233,8 +295,10 @@ async def lifespan(app: FastAPI):
     for t in worker_tasks:
         t.cancel()
     from app.pulse import detector
+    from app.shared import bus as shared_bus
 
     detector.stop()
+    await shared_bus.stop_shared()
 
 
 def create_app() -> FastAPI:
@@ -246,6 +310,9 @@ def create_app() -> FastAPI:
             "one shared brain (LOOM), every LLM call through SENTINEL."
         ),
         lifespan=lifespan,
+        docs_url=None if settings.is_production else "/docs",
+        redoc_url=None if settings.is_production else "/redoc",
+        openapi_url=None if settings.is_production else "/openapi.json",
     )
     from starlette.middleware.base import BaseHTTPMiddleware
 

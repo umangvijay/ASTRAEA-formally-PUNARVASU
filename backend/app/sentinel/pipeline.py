@@ -8,6 +8,7 @@ gracefully when their weights/keys are absent.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -20,15 +21,21 @@ from app.config import settings
 from app.sentinel.models import GuardrailEvent, GuardrailRule
 from app.shared.bus import publish
 
-_RULE_CACHE: dict[int, re.Pattern] = {}
+_RULE_CACHE: dict[tuple, re.Pattern] = {}
+_RULE_CACHE_MAX = 512
 _KEEP_WINDOW = 48  # chars carried across stream chunks so split patterns are still caught
 
 
 def _compile(rule: GuardrailRule) -> re.Pattern:
-    key = rule.id or hash((rule.name, rule.pattern))
+    # Key by identity + pattern, not the row id alone: ids collide when the DB is
+    # recreated (tests, a fresh dev boot, a new Cloud Run instance) and a stale
+    # compiled pattern from the previous database would silently mismatch.
+    key = (rule.id, rule.pattern, rule.replacement or "")
     cached = _RULE_CACHE.get(key)
     if cached is None:
         cached = re.compile(rule.pattern, re.IGNORECASE | re.MULTILINE)
+        if len(_RULE_CACHE) >= _RULE_CACHE_MAX:
+            _RULE_CACHE.clear()
         _RULE_CACHE[key] = cached
     return cached
 
@@ -130,33 +137,71 @@ async def scan_text(
 
     # Classify the post-redaction text. PAN/email tokens trip injection
     # models; Layer 1 already replaced them. A jailbreak that also carries
-    # PII is still visible after redact.
-    to_classify = result.text
+    # PII is still visible after redact. The ML layers never see more than
+    # sentinel_max_scan_chars — a multi-hundred-KB message must not turn one
+    # request into seconds of CPU work (DoS-able by any tenant otherwise).
+    ml_cap = max(1_000, settings.sentinel_max_scan_chars)
+    to_classify = result.text[:ml_cap]
     # PII-only redacts are not injection. Running ONNX/embeddings on them
     # blocked legitimate "here is my PAN / email" traffic once weights loaded.
     only_redacted = bool(result.hits) and all(h.get("action") == "redact" for h in result.hits)
 
     # ── Layer 2: ONNX classifier (graceful degradation) ─────────────────
+    # Inference runs in a worker thread: ONNX on the event loop blocked every
+    # concurrent request for the whole scan (login, ingest, SSE all starved).
+    # A single-layer score is also never trusted alone below the hard
+    # threshold — benign imperative text ("Say exactly: …") scores ~0.9 on
+    # deberta and a false-positive firewall that kills real work is worse
+    # than a borderline pass. soft hit → flag; block needs the hard
+    # threshold OR corroboration from an independent layer (L1 flag / L3
+    # similarity / L4 judge).
+    onnx_soft_hit: float | None = None
     if direction == "input" and ml and not only_redacted:
         try:
             from app.sentinel.onnx_classifier import classify
 
-            onnx_threshold = settings.sentinel_onnx_threshold
-            injection_prob = classify(to_classify)
-            if injection_prob is not None and injection_prob >= onnx_threshold:
+            injection_prob = await asyncio.to_thread(classify, to_classify)
+            if injection_prob is not None and injection_prob >= settings.sentinel_onnx_block_threshold:
+                # Even a hard score gets one judge confirmation when a judge is
+                # reachable: the real model scores benign imperative text
+                # ("Say exactly: …") at 0.9999, and a false-positive firewall that
+                # kills real work is worse than one extra judge round-trip. No
+                # judge → fail closed (block stands).
+                verdict = await _llm_judge(to_classify)
+                if verdict and not verdict.get("block"):
+                    result.hits.append({
+                        "rule_name": "onnx_injection_classifier",
+                        "action": "flag",
+                        "severity": "high",
+                        "count": 1,
+                        "sample": (f"injection_probability={injection_prob:.4f} "
+                                   f"overruled by judge: {verdict.get('reason', '')[:60]}"),
+                        "layer": 2,
+                    })
+                else:
+                    result.hits.append({
+                        "rule_name": "onnx_injection_classifier",
+                        "action": "block",
+                        "severity": "critical",
+                        "count": 1,
+                        "sample": f"injection_probability={injection_prob:.4f}",
+                        "layer": 2,
+                    })
+                    result.action = "block"
+                    result.latency_ms = (time.perf_counter() - t0) * 1000
+                    if persist:
+                        await _persist_hits(db, tenant_id, direction, result, model)
+                    return result
+            elif injection_prob is not None and injection_prob >= settings.sentinel_onnx_threshold:
+                onnx_soft_hit = injection_prob
                 result.hits.append({
                     "rule_name": "onnx_injection_classifier",
-                    "action": "block",
-                    "severity": "critical",
+                    "action": "flag",
+                    "severity": "high",
                     "count": 1,
                     "sample": f"injection_probability={injection_prob:.4f}",
                     "layer": 2,
                 })
-                result.action = "block"
-                result.latency_ms = (time.perf_counter() - t0) * 1000
-                if persist:
-                    await _persist_hits(db, tenant_id, direction, result, model)
-                return result
         except Exception:
             pass  # Layer 2 unavailable — continue
 
@@ -166,7 +211,7 @@ async def scan_text(
             from app.sentinel.attack_patterns import check_similarity
 
             sim_threshold = settings.sentinel_similarity_threshold
-            match = check_similarity(to_classify, threshold=sim_threshold)
+            match = await asyncio.to_thread(check_similarity, to_classify, threshold=sim_threshold)
             if match is not None:
                 result.hits.append({
                     "rule_name": "embedding_similarity",
@@ -184,9 +229,31 @@ async def scan_text(
         except Exception:
             pass  # Layer 3 unavailable — continue
 
+    # Corroboration: the soft ONNX hit blocks only when an independent layer
+    # agrees (a Layer-1 flag rule fired on the same text). Alone it stays a
+    # flag — visible in the console, but never a 400 on its own.
+    if onnx_soft_hit is not None and result.action != "block":
+        corroborated = any(
+            h.get("rule_name") != "onnx_injection_classifier" and h.get("action") in ("flag", "block")
+            for h in result.hits
+        )
+        if corroborated:
+            soft_hit = next(
+                h for h in result.hits
+                if h.get("rule_name") == "onnx_injection_classifier" and h.get("action") == "flag"
+            )
+            soft_hit["action"] = "block"
+            soft_hit["severity"] = "critical"
+            soft_hit["sample"] = f"injection_probability={onnx_soft_hit:.4f} (corroborated)"
+            result.action = "block"
+            result.latency_ms = (time.perf_counter() - t0) * 1000
+            if persist:
+                await _persist_hits(db, tenant_id, direction, result, model)
+            return result
+
     # ── Layer 4: LLM-as-judge (only for borderline input, async) ────────
-    # Borderline = a flag-action rule fired. PII redacts are not borderline
-    # injection — they are already handled.
+    # Borderline = a flag-action rule fired OR the ONNX soft hit above — the
+    # judge is the tiebreaker that lets borderline-but-benign text through.
     flagged = [h for h in result.hits if h.get("action") == "flag"]
     if direction == "input" and ml and flagged and result.action != "block":
         try:

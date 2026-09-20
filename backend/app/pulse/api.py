@@ -135,7 +135,15 @@ class ChaosIn(BaseModel):
 async def chaos(payload: ChaosIn, user=Depends(get_current_user),
                 db: AsyncSession = Depends(get_db)):
     """Inject a fault into live telemetry. Demo services if they are up; otherwise
-    the control plane's own series (so Cloud Run MEDIC still has a real MTTD clock)."""
+    the control plane's own series (so Cloud Run MEDIC still has a real MTTD clock).
+
+    Production: disabled by default — chaos distorts the platform's own series
+    that MEDIC learns from. Opt in with ASTRAEA_CHAOS_ENABLED=1."""
+    if settings.is_production and not settings.chaos_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="chaos injection is disabled in production (set ASTRAEA_CHAOS_ENABLED=1)",
+        )
     from app.demo import services as demo
     from app.pulse import live as pulse_live
     from app.pulse.models import FaultInjection

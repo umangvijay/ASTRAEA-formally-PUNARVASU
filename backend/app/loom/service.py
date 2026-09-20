@@ -140,17 +140,23 @@ async def context_for(
     visible = visible[:limit]
 
     out: list[dict] = []
+    if not visible:
+        return out
+    # Stamp THIS read for every visible item in ONE commit, then fetch all the
+    # usage trails in ONE grouped query (was: a commit + a query per item —
+    # 20 fsyncs per loom_read tool call).
     for item in visible:
-        # stamp THIS read first, so the trail includes whoever is reading right now
         db.add(LoomUsage(item_id=item.id, module=module))
-        await db.commit()
-        used_by = sorted(set(
-            (await db.execute(
-                select(LoomUsage.module).where(LoomUsage.item_id == item.id).distinct()
-            )).scalars().all()
-        ))
-        out.append(item_out(item, used_by))
-    return out
+    await db.commit()
+    usage_rows = (await db.execute(
+        select(LoomUsage.item_id, LoomUsage.module)
+        .where(LoomUsage.item_id.in_([i.id for i in visible]))
+        .distinct()
+    )).all()
+    used_by_map: dict[str, set[str]] = {}
+    for item_id, used_module in usage_rows:
+        used_by_map.setdefault(item_id, set()).add(used_module)
+    return [item_out(item, sorted(used_by_map.get(item.id, set()))) for item in visible]
 
 
 async def org_profile(db: AsyncSession, tenant_id: str) -> dict:

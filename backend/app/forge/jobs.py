@@ -19,27 +19,12 @@ async def _nightly() -> None:
         await asyncio.sleep(interval)
         try:
             from app.db import SessionLocal
-            from app.forge import eval as forge_eval
 
             async with SessionLocal() as db:
-                mining = await forge_eval.mine_failures(db)
-                if not mining["proposals"]:
-                    continue
-                top = mining["proposals"][0]
-                candidate = await forge_eval.propose_candidate(
-                    db, source="failure-mining", kind="prompt-variant",
-                    reason=f"{top['cluster']} ×{top['occurrences']}: {top['change']['suggestion']}",
-                    payload={"prompt_template": None},
-                )
-                eval_run = await forge_eval.run_eval(
-                    db, variant_kind="prompt-variant",
-                    payload={"prompt_template": None},
-                    variant_name=f"consolidator-{candidate.id}",
-                )
-                verdict = await forge_eval.promote_if_better(
-                    db, eval_run=eval_run, candidate=candidate, kind="prompt-variant",
-                    payload={"prompt_template": None},
-                )
+                from app.forge import eval as forge_eval
+
+                verdict = await forge_eval.consolidate_once(db)
+            if verdict:
                 logger.info("consolidator: %s", json.dumps(verdict, default=str))
         except Exception:  # noqa: BLE001 — sleep-time compute must never crash the platform
             logger.exception("forge consolidator failed")

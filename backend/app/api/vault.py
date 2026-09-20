@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,7 +97,8 @@ async def delete_secret(item_id: str, request: Request,
     await db.commit()
     await audit(db, tenant_id=user.tenant_id, user_id=user.id,
                 action="vault.delete", detail=item.name, ip=_ip(request))
-    return {"deleted": True}
+    # 204 must carry no body — a JSON body here breaks strict clients
+    return Response(status_code=204)
 
 
 @router.get("/api/security/audit")

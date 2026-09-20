@@ -8,10 +8,12 @@ a clear spoken apology, never a canned conversation script.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.loom import service as loom
 
 
@@ -53,7 +55,12 @@ async def respond(db: AsyncSession, tenant_id: str, history: list[dict], user_te
 
     from app.sentinel.llm import complete
 
-    out = await complete(db, tenant_id, messages, origin_module="vaani", run_id=origin_run_id)
+    # Bounded: a stalled provider must fail the turn (the caller speaks an
+    # apology) — it can never hold the voice socket open forever.
+    out = await asyncio.wait_for(
+        complete(db, tenant_id, messages, origin_module="vaani", run_id=origin_run_id),
+        timeout=max(5, settings.llm_step_timeout_s),
+    )
     parsed = _parse_json(out["content"])
     if parsed is None or "reply" not in parsed:
         # the model answered in prose: use it as the reply, no booking this turn

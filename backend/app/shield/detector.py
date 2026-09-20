@@ -31,7 +31,6 @@ from app.shared.bus import publish
 logger = logging.getLogger("shield.detector")
 
 _loop_task: asyncio.Task | None = None
-_SCORE_HISTORY: dict[str, list[list[float]]] = {}  # host -> recent feature vectors
 
 
 # ── pure rule evaluation ───────────────────────────────────────────
@@ -115,9 +114,10 @@ def evaluate_rules(events: list[dict], rules: list[dict]) -> list[dict]:
 
 
 def if_score(features: list[list[float]], latest: list[float]) -> float | None:
-    """Statistical confidence: Isolation Forest decision over the host's own history."""
-    history = _SCORE_HISTORY.setdefault(",".join(f"{x:.0f}" for x in latest), [])
-    if len(features) < 20:
+    """Statistical confidence: Isolation Forest decision over the host's own
+    event features. Pure function — rules carry the decision, the forest only
+    adds corroboration to the evidence. Needs a real history to learn from."""
+    if len(features) < 20 or not latest:
         return None
     model = IsolationForest(n_estimators=80, contamination=0.05, random_state=7)
     model.fit(features)
@@ -171,6 +171,22 @@ async def _evaluate_tenant(tenant_id: str) -> list[ShieldIncident]:
         if not hits:
             return []
 
+        # Statistical corroboration: Isolation Forest over each hit host's
+        # numeric event features (bytes, ports, external flag) — attached as
+        # evidence on the hit. Needs ≥20 events to have learned anything.
+        host_events: dict[str, list[dict]] = {}
+        for e in plain:
+            host_events.setdefault(e["host"], []).append(e)
+        for hit in hits:
+            hit_host = hit.get("host") or next(
+                (e["host"] for e in plain if e.get("src_ip") == hit.get("src_ip")), None)
+            evs = host_events.get(hit_host or "", [])
+            feats = [[float(e.get("bytes_out") or 0), float(e.get("dst_port") or 0),
+                      1.0 if e.get("external") else 0.0] for e in evs]
+            score = if_score(feats, feats[-1] if feats else [])
+            if score is not None:
+                hit["if_score"] = round(score, 4)
+
         # dedupe: one open incident per host per cooldown
         open_incidents = (
             (
@@ -220,13 +236,16 @@ async def _evaluate_tenant(tenant_id: str) -> list[ShieldIncident]:
             db.add(incident)
             await db.flush()
             incidents.append(incident)
-            await publish(f"shield:{tenant_id}", {
-                "kind": "incident", "incident_id": incident.id, "host": host,
-                "techniques": tech_out, "severity": incident.severity,
-            })
             run_id = await _spawn_shield_run(db, incident)
             spawn_after_commit.append(run_id)
         await db.commit()
+        # publish only after the incident + run are durable — SSE consumers must
+        # never receive an incident id that fails to commit
+        for incident in incidents:
+            await publish(f"shield:{tenant_id}", {
+                "kind": "incident", "incident_id": incident.id, "host": incident.host,
+                "techniques": incident.techniques, "severity": incident.severity,
+            })
         for spawned in spawn_after_commit:
             engine.spawn(spawned)
         return incidents
@@ -272,7 +291,11 @@ async def loop() -> None:
                 async with SessionLocal() as db:
                     if not await module_active(db, tenant_id, "shield"):
                         continue
-                await detect_once(tenant_id)
+                # one tenant's failure must not abort the others this tick
+                try:
+                    await detect_once(tenant_id)
+                except Exception:  # noqa: BLE001 — per-tenant isolation
+                    logger.exception("shield detect failed for tenant %s", tenant_id)
         except Exception:  # noqa: BLE001 — heartbeat survives anything
             logger.exception("shield tick failed")
         await asyncio.sleep(settings.shield_detector_interval_seconds)

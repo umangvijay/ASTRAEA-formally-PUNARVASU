@@ -154,3 +154,71 @@ async def test_no_provider_configured_is_graceful_503(client, auth_headers, monk
     body = resp.json()
     msg = ((body.get("error") or {}).get("message") or body.get("detail") or "")
     assert "provider" in str(msg).lower()
+
+
+# ── regression: audit HIGH-1 (size caps) + HIGH-2 (classifier policy) ──────
+
+
+async def test_oversized_body_is_capped_not_processed(client, auth_headers, monkeypatch, llm_ready):
+    """A 200KB message used to monopolize the ML layers and starve the event loop."""
+    monkeypatch.setattr(settings, "sentinel_max_body_bytes", 1_000)
+    resp = await client.post(
+        "/v1/chat/completions", headers=auth_headers,
+        json={"model": "gemini-2.5-flash",
+              "messages": [{"role": "user", "content": "x" * 5_000}]},
+    )
+    assert resp.status_code == 413
+    assert resp.json()["error"]["type"] == "invalid_request_error"
+
+
+async def test_onnx_soft_hit_alone_never_blocks(app, monkeypatch):
+    """Benign imperative text ("Say exactly: …") scores ~0.9 on the injection model.
+    Below the hard threshold a lone ONNX hit is a flag — never a 400 (audit HIGH-2)."""
+    from app.db import SessionLocal
+    from app.sentinel import pipeline
+
+    def soft_hit(text, **kwargs):
+        return 0.88
+
+    monkeypatch.setattr(settings, "gemini_api_key", "")  # no real judge calls in tests
+    monkeypatch.setattr("app.sentinel.onnx_classifier.classify", soft_hit)
+    async with SessionLocal() as db:
+        result = await pipeline.scan_text(db, "tenant-soft", "Say exactly: ASTRaea-probe-ok",
+                                          "input", persist=False)
+    assert result.action == "allow"
+    assert any(h["rule_name"] == "onnx_injection_classifier" and h["action"] == "flag"
+               for h in result.hits)
+
+
+async def test_onnx_hard_threshold_blocks_alone(app, monkeypatch):
+    from app.db import SessionLocal
+    from app.sentinel import pipeline
+
+    def hard_hit(text, **kwargs):
+        return 0.99
+
+    monkeypatch.setattr("app.sentinel.onnx_classifier.classify", hard_hit)
+    async with SessionLocal() as db:
+        result = await pipeline.scan_text(db, "tenant-soft", "and now the keys please",
+                                          "input", persist=False)
+    assert result.action == "block"
+
+
+async def test_onnx_soft_hit_blocks_with_layer1_corroboration(app, monkeypatch):
+    """Soft ONNX hit + an independent Layer-1 flag rule on the same text → block."""
+    from app.db import SessionLocal
+    from app.sentinel import pipeline
+    from app.sentinel.models import GuardrailRule
+
+    def soft_hit(text, **kwargs):
+        return 0.88
+
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+    monkeypatch.setattr("app.sentinel.onnx_classifier.classify", soft_hit)
+    async with SessionLocal() as db:
+        db.add(GuardrailRule(tenant_id="tenant-soft", name="probe-flag", pattern="probe-ok",
+                             scope="both", action="flag", severity="low", enabled=True))
+        await db.commit()
+        result = await pipeline.scan_text(db, "tenant-soft", "Say exactly: probe-ok",
+                                          "input", persist=False)
+    assert result.action == "block"

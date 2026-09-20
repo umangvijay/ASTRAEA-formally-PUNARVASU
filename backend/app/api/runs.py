@@ -131,27 +131,35 @@ async def stream_run(run_id: str, request: Request, since: int = 0,
     if run is None or run.tenant_id != user.tenant_id:
         raise HTTPException(status_code=404, detail="run not found")
 
+    topic = f"run:{run_id}"
+    # subscribe BEFORE the backlog query: an event committed between the
+    # backlog SELECT and subscribe() used to fall through both paths and be
+    # lost to this client. Duplicate delivery is prevented with a seen-id set.
+    queue = subscribe(topic)
     backlog = (
         (await db.execute(
             select(RunEvent).where(RunEvent.run_id == run_id, RunEvent.id > since)
-            .order_by(RunEvent.id)
+            .order_by(RunEvent.id).limit(MAX_EVENTS_REPLAY)
         ))
         .scalars()
         .all()
     )
 
     async def gen():
-        topic = f"run:{run_id}"
-        queue = subscribe(topic)
         try:
+            seen = 0
             for e in backlog:
-                yield sse_format(_json({_event_out(e)}))
+                seen = e.id
+                yield sse_format(_json(_event_out(e)))
             yield sse_format('{"type": "caught_up"}')
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=15)
+                    # skip anything already replayed from the backlog
+                    if isinstance(payload, dict) and payload.get("id") and payload["id"] <= seen:
+                        continue
                     yield sse_format(payload)
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"

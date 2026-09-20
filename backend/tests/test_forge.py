@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.forge import eval as forge_eval
-from app.forge.models import ForgeChampion, ForgeEvalRun
+from app.forge.models import ForgeCandidate, ForgeChampion, ForgeEvalRun
 from app.db import SessionLocal
 
 
@@ -120,7 +120,120 @@ async def test_failure_mining_proposes_from_real_events(app, auth_headers):
     assert "timeout" in json.dumps(top["change"]).lower()
 
 
+async def test_consolidator_authors_a_real_variant(app, auth_headers, monkeypatch):
+    """The nightly consolidator must AUTHOR a new prompt variant from the mined
+    failures — the old code re-evaluated the unchanged champion
+    (prompt_template: None), so nothing ever actually evolved."""
+    tenant_id = decode_tid(auth_headers)
+    async with SessionLocal() as db:
+        from app.core.models import Run, RunEvent
+
+        run = Run(tenant_id=tenant_id, goal="g", workflow=[{"name": "s", "type": "tool"}],
+                  origin_module="operator")
+        db.add(run)
+        await db.flush()
+        db.add(RunEvent(run_id=run.id, type="step_failed", node="web.research",
+                        payload={"tool": "web.research", "error": "upstream provider timeout"}))
+        await db.commit()
+
+    from app.model_forge.data_gen import generate_tasks
+    from app.sentinel import llm as sentinel_llm
+
+    gold_by_question = {t.question: t.gold_sql for t in generate_tasks(200, seed=23)}
+
+    async def fake_complete(db, tenant_id, messages, **kwargs):
+        prompt = messages[-1]["content"]
+        if "You improve a text-to-SQL prompt template" in prompt:
+            return {"content": "v2-enhanced\nSchema: {schema}\nQuestion: {question}",
+                    "provider": "test-double", "model": "t", "usage": {}}
+        question = next((l for l in prompt.splitlines() if l.startswith("Question:")), "")
+        question = question.removeprefix("Question: ").strip()
+        if "v2-enhanced" in prompt and question in gold_by_question:
+            return {"content": gold_by_question[question],
+                    "provider": "test-double", "model": "t", "usage": {}}
+        return {"content": "SELECT * FROM nonexistent_table_xyz",
+                "provider": "test-double", "model": "t", "usage": {}}
+
+    monkeypatch.setattr(sentinel_llm, "complete", fake_complete)
+
+    async with SessionLocal() as db:
+        verdict = await forge_eval.consolidate_once(db)
+        cand = (await db.execute(
+            select(ForgeCandidate).order_by(ForgeCandidate.id.desc()).limit(1)
+        )).scalar_one()
+
+    assert cand.payload["prompt_template"] == \
+        "v2-enhanced\nSchema: {schema}\nQuestion: {question}"
+    assert cand.payload["prompt_template"] is not None
+    assert "{question}" in cand.payload["prompt_template"]
+    assert cand.source.startswith("failure-mining:llm-authored")
+    assert verdict is not None and "promoted" in verdict
+
+
+async def test_consolidator_rejects_a_zero_score_variant(app, auth_headers, monkeypatch):
+    """An authored variant that passes NOTHING must never displace the champion —
+    not even a 0-score bootstrap champion. The live prompt only changes on a
+    measured win."""
+    tenant_id = decode_tid(auth_headers)
+    async with SessionLocal() as db:
+        from app.core.models import Run, RunEvent
+
+        run = Run(tenant_id=tenant_id, goal="g", workflow=[{"name": "s", "type": "tool"}],
+                  origin_module="medic")
+        db.add(run)
+        await db.flush()
+        db.add(RunEvent(run_id=run.id, type="step_failed", node="shell",
+                        payload={"tool": "shell", "error": "tool timeout after 10s"}))
+        await db.commit()
+        champ_before = await forge_eval._current_champion(db)
+        template_before = champ_before.prompt_template
+
+    from app.sentinel import llm as sentinel_llm
+
+    async def fake_complete(db, tenant_id, messages, **kwargs):
+        prompt = messages[-1]["content"]
+        if "You improve a text-to-SQL prompt template" in prompt:
+            # placeholder-valid but useless template → eval scores 0
+            return {"content": "Schema: {schema}\nQuestion: {question}",
+                    "provider": "test-double", "model": "t", "usage": {}}
+        return {"content": "SELECT * FROM nonexistent_table_xyz",
+                "provider": "test-double", "model": "t", "usage": {}}
+
+    monkeypatch.setattr(sentinel_llm, "complete", fake_complete)
+
+    async with SessionLocal() as db:
+        verdict = await forge_eval.consolidate_once(db)
+        cand = (await db.execute(
+            select(ForgeCandidate).order_by(ForgeCandidate.id.desc()).limit(1)
+        )).scalar_one()
+        champ_after = await forge_eval._current_champion(db)
+
+    assert verdict["promoted"] is False
+    assert cand.status == "rejected"
+    assert champ_after.prompt_template == template_before
+
+
+def test_hardened_variant_keeps_both_placeholders():
+    """The deterministic fallback (provider down) must stay executable: it
+    inherits the champion's {schema}/{question} placeholders."""
+    mining = {"proposals": [
+        {"cluster": "step_failed:shell", "occurrences": 3, "sample_error": "timeout",
+         "change": {"suggestion": "increase tool timeout + add retry with backoff"}},
+    ]}
+    variant = forge_eval._hardened_variant("Schema: {schema}\nQuestion: {question}", mining)
+    assert "{schema}" in variant and "{question}" in variant
+    assert "retry with backoff" in variant
+
+
 def decode_tid(auth_headers) -> str:
     from app.shared.security import decode_access_token
 
     return decode_access_token(auth_headers["Authorization"].removeprefix("Bearer "))["tid"]
+
+
+async def test_candidate_kind_is_validated(client, auth_headers):
+    """Audit MEDIUM: kind:"warp-drive" used to return 201 for a candidate the
+    eval harness could never run. Validate against the known kinds."""
+    resp = await client.post("/api/forge/candidates", headers=auth_headers,
+                             json={"kind": "warp-drive"})
+    assert resp.status_code == 422

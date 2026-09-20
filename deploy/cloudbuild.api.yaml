@@ -4,5 +4,8 @@ steps:
 images:
   - ${_IMAGE}
 substitutions:
-  _IMAGE: gcr.io/${PROJECT_ID}/astraea-api
+  # Artifact Registry (gcr.io is deprecated): create the repo once with
+  # `gcloud artifacts repositories create astraea --repository-format=docker --location=${_REGION}`
+  _REGION: us-central1
+  _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/astraea/api:latest
 timeout: 1200s

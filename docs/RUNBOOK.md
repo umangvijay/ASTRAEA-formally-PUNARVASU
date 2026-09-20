@@ -72,6 +72,19 @@ Startup additionally dedupes accumulated sentinel rule overrides.
    and the artifact lands in LOOM (`FROM CONSOLE`).
 4. Console → FORGE → *Eval prompt variant* → score appears on the chart.
 
+## Soak / load test (before every release)
+
+```bash
+# terminal 1: python3 main.py            (or any running API)
+# terminal 2:
+cd backend && ../.venv/bin/python scripts/soak.py --url http://localhost:8000 --users 20 --runs 5
+```
+
+20 virtual users × 5 durable runs over real HTTP (guest → run → poll → verify
+events, plus a live SSE probe). Gate: `completed == users×runs`, `failures: 0`,
+SSE push OK. Two consecutive soaks on the same instance also exercise the
+detector/history path at scale — run both before shipping.
+
 ## Security operations
 
 - Passwords: Argon2id (64MB); legacy scrypt hashes auto-upgrade on next login.

@@ -55,6 +55,37 @@ async def _wait_for(predicate, timeout=8.0, interval=0.2):
     return False
 
 
+async def test_reproduce_is_honest_without_a_sidecar():
+    """No demo sidecar for a service → verified:false with the real reason.
+    The old code returned fabricated `verified:true` "reproduced against live
+    telemetry" without probing anything — feeding the approval gate a lie."""
+    from types import SimpleNamespace
+
+    from app.medic.tools import _reproduce
+
+    investigation = json.dumps({"hypotheses": [
+        {"service": "astraea-api", "kind": "error_storm", "confidence": 0.9}]})
+    out = json.loads((await _reproduce({"investigation": investigation}))["content"])
+    assert out["verified"] is False
+    assert "no sandbox sidecar" in out["details"]
+
+
+async def test_patch_is_honest_without_a_sidecar(tmp_path):
+    """No sandbox → a RECOMMENDATION is recorded, `applied:false`. The old code
+    wrote `"applied": true` with an invented "circuit-breaker / rollback" story."""
+    from types import SimpleNamespace
+
+    from app.medic.tools import _patch
+
+    investigation = json.dumps({"hypotheses": [
+        {"service": "astraea-api", "kind": "error_storm", "confidence": 0.9}],
+        "summary": "drift"})
+    run = SimpleNamespace(id="abcdefgh12345678", tenant_id="t", goal="g")
+    out = json.loads((await _patch(None, run, {"investigation": investigation}))["content"])
+    assert out["applied"] is False
+    assert "no live mitigation was applied" in out["mitigation"]
+
+
 async def test_ten_random_faults_gate(client, auth_headers):
     tenant_id = _tid(auth_headers)
     random.seed()  # genuinely random — the gate must hold for any draw
