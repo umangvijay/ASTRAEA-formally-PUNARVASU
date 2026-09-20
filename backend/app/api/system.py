@@ -105,6 +105,17 @@ async def modules() -> dict:
     }
 
 
+@router.get("/api/system/models")
+async def models(user=Depends(get_current_user)) -> dict:
+    """The live model menu for the console picker: what the SENTINEL chain can
+    actually serve right now — never a static list."""
+    from app.sentinel.upstream import available_models
+
+    menu = available_models()
+    return {"models": menu,
+            "default": next((m["id"] for m in menu[1:] if m["available"]), "")}
+
+
 async def _alive(task) -> bool:
     return task is not None and not task.done()
 

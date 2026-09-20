@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     # (see sentinel.upstream.vertex_generate_url). Override with
     # ASTRAEA_VERTEX_DEFAULT_MODEL=gemini-3.1-pro-preview for Pro.
     vertex_default_model: str = "gemini-3.8-flash"
+    vertex_pro_model: str = "gemini-3.1-pro-preview"  # "" hides Pro from the picker
     # Anthropic Claude (optional)
     anthropic_api_key: str = ""
     anthropic_default_model: str = "claude-sonnet-4-20250514"

@@ -761,7 +761,7 @@ input:focus, textarea:focus { outline: none; }
   min-height: 54px;
   height: 54px;
   padding: 0 18px 0 22px;
-  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  background: var(--paper); /* opaque: content scrolls beneath the sticky bar */
   border-bottom: 1px solid var(--line-strong);
   flex-wrap: nowrap;
   overflow: visible;
@@ -2298,9 +2298,13 @@ html[data-theme="dark"] .pagehead {
 html[data-theme="dark"] .login-card {
   background: transparent;
 }
-html[data-theme="dark"] .public-nav,
-html[data-theme="dark"] .commandbar {
+html[data-theme="dark"] .public-nav {
   background: var(--glass-bg);
+}
+/* the console commandbar is sticky: real page content scrolls beneath it, so it
+   must stay opaque — a translucent background mixes scrolled text into the nav */
+html[data-theme="dark"] .commandbar {
+  background: var(--paper);
 }
 html[data-theme="dark"] .section:not(.section--sky) {
   background: color-mix(in srgb, var(--paper) 58%, transparent);

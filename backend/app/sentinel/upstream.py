@@ -195,6 +195,42 @@ def _provider_ready(provider: str) -> bool:
     return False
 
 
+def available_models() -> list[dict]:
+    """The honest model menu for the console picker: every general-chat model
+    the chain can serve RIGHT NOW, flagged by live provider readiness. The
+    SQL champion / on-device weights are deliberately absent — they never
+    serve general chat without an explicit hint."""
+    menu: list[dict] = [
+        {"id": "", "label": "auto · provider chain decides", "provider": "auto",
+         "available": True},
+    ]
+    vertex_up = _provider_ready("vertex")
+    menu.append({"id": settings.vertex_default_model,
+                 "label": f"{settings.vertex_default_model} · fast",
+                 "provider": "vertex", "available": vertex_up})
+    if settings.vertex_pro_model:
+        menu.append({"id": settings.vertex_pro_model,
+                     "label": f"{settings.vertex_pro_model} · deep",
+                     "provider": "vertex", "available": vertex_up})
+    if settings.gemini_api_key and settings.gemini_default_model:
+        menu.append({"id": settings.gemini_default_model,
+                     "label": f"{settings.gemini_default_model} · API key",
+                     "provider": "gemini", "available": True})
+    if settings.anthropic_api_key:
+        menu.append({"id": settings.anthropic_default_model,
+                     "label": f"{settings.anthropic_default_model} · Claude",
+                     "provider": "anthropic", "available": True})
+    if settings.groq_api_key:
+        menu.append({"id": settings.groq_default_model,
+                     "label": f"{settings.groq_default_model} · Groq",
+                     "provider": "groq", "available": True})
+    if _provider_ready("ollama"):
+        menu.append({"id": settings.ollama_default_model,
+                     "label": f"{settings.ollama_default_model} · local Ollama",
+                     "provider": "ollama", "available": True})
+    return menu
+
+
 def pick_provider(model: str | None) -> tuple[str, str]:
     """Returns (provider, model). Model name hints route to a provider; else first ready in order."""
     model = model or ""
