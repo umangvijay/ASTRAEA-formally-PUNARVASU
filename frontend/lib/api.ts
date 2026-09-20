@@ -224,6 +224,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export async function streamChat(
   messages: { role: string; content: string }[],
   onDelta: (text: string) => void,
+  model = "gemini-3.8-flash",
 ): Promise<{ provider?: string; model?: string }> {
   const base = await resolveApiBase();
   const resp = await fetch(`${base}/v1/chat/completions`, {
@@ -232,7 +233,11 @@ export async function streamChat(
       "Content-Type": "application/json",
       Authorization: `Bearer ${getToken() ?? ""}`,
     },
-    body: JSON.stringify({ messages, stream: true }),
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+    }),
   });
   if (resp.status === 401 && typeof window !== "undefined") {
     clearToken();
@@ -249,7 +254,7 @@ export async function streamChat(
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let model: string | undefined;
+  let responseModel: string | undefined;
   let provider: string | undefined;
   for (;;) {
     const { done, value } = await reader.read();
@@ -262,7 +267,7 @@ export async function streamChat(
       for (const line of frame.split("\n")) {
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
-        if (data === "[DONE]") return { provider, model };
+        if (data === "[DONE]") return { provider, model: responseModel };
         try {
           const payload = JSON.parse(data) as {
             model?: string;
@@ -273,7 +278,7 @@ export async function streamChat(
           if (payload.error?.message) {
             throw new ApiError(503, payload.error.message);
           }
-          if (payload.model) model = payload.model;
+          if (payload.model) responseModel = payload.model;
           if (payload.astraea?.provider) provider = payload.astraea.provider;
           const piece = payload.choices?.[0]?.delta?.content;
           if (piece) onDelta(piece);
@@ -283,7 +288,7 @@ export async function streamChat(
       }
     }
   }
-  return { provider, model };
+  return { provider, model: responseModel };
 }
 
 // ── realtime SSE (fetch-based so the Authorization header works) ─────────
